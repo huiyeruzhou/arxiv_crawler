@@ -5,6 +5,11 @@
 ## 使用方法
 
 1. 克隆本仓库到本地
+
+```bash
+git clone https://github.com/huiyeruzhou/arxiv_crawker.git
+```
+
 2. 安装依赖
 
 ```bash
