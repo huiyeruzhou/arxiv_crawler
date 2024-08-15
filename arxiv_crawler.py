@@ -256,7 +256,8 @@ class ArxivScraper:
         """
         file.write(f"### {paper['title']}\n")
         file.write(f"- **标题**: {paper['标题']}\n")
-        file.write(f"- **Categories**: {" ".join(paper['categories'])}\n")
+        categories = " ".join(paper['categories'])
+        file.write(f"- **Categories**: {categories}\n")
         file.write(f"- **摘要**: {paper['摘要']}\n")
         file.write(f"- **Date**: {paper['date']}\n")
         file.write(f"- **URL**: {paper['url']}\n")
@@ -274,7 +275,8 @@ class ArxivScraper:
             file (_io.TextIOWrapper): 文件句柄
         """
         file.write(f"- {paper['title']}\n")
-        file.write(f"  - **Reason**: {paper['reason']} **Categories**: {" ".join(paper['categories'])}\n")
+        categories = " ".join(paper['categories'])
+        file.write(f"  - **Reason**: {paper['reason']} **Categories**: {categories}\n")
 
     async def translate(self):
         """
@@ -306,13 +308,13 @@ class ArxivScraper:
         for paper in self.papers:
             date = paper['date']
             if date not in files:
-                files[date] = open(self.output_dir / f"{date}.md", 'w')
+                files[date] = open(self.output_dir / f"{date}.md", 'w', encoding='utf-8')
             self.print_paper(paper, files[date])
         # 输出过滤的论文，按日期整理
         for paper in self.filtered_papers:
             date = paper['date']
             if date not in files:
-                files[date] = open(self.output_dir / f"{date}.md", 'w')
+                files[date] = open(self.output_dir / f"{date}.md", 'w', encoding='utf-8')
             self.print_filtered_paper(paper, files[date])
         for file in files.values():
             file.close()
