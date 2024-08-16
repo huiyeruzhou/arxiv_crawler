@@ -27,24 +27,41 @@ python arxiv_crawler.py
 
 这代码会将最近**一天**内大模型相关的论文信息爬取到本地，注意category白名单并不起作用，因为还没有设置黑名单。要广泛的爬取论文，可以添加不感兴趣的category到黑名单中，并用白名单进行豁免。
 
-如果你不需要翻译，只需要注释掉
+4. 用法说明
+
+- 要修改爬取的时间范围，领域，关键字，请参考`arxiv_crawler.py`中`ArxivScraper`类的注释：
+  - Args:
+    - date_from (str): 开始日期
+    - date_until (str): 结束日期
+    - category_blacklist (list, optional): 黑名单. Defaults to [].
+    - category_whitelist (list, optional): 白名单. Defaults to ["cs.CV", "cs.AI", "cs.LG", "cs.CL"]. 
+                                        如果一个文章的分类在黑名单中，且没有任何一个分类在白名单中，则被过滤掉
+    - oprional_keywords (list, optional): 关键词, 各词之间关系为OR, 在标题/摘要中至少要出现一个关键词才会被爬取.
+                                        Defaults to ["LLM", "language model", "multimodal", "finetuning", "GPT"].
+
+   
+- 如果你不需要翻译，只需要注释掉
 ```py
 asyncio.run(scraper.translate())
 ```
-即可
+
+- 输出文件名是根据日期生成的，可以使用`output`方法的`filename_format`参数修改日期格式，默认为`%Y-%m-%d`即形如`2024-08-08.md`。
+```py
+scraper.output(filename_format='%Y-%m-%d')
+```
 
 ## 结果示例
 
 假设爬取了七天的论文，那么结果可能形如：
 ```bash
 output_llm
-├── 10 August, 2024.md
-├── 11 August, 2024.md
-├── 12 August, 2024.md
-├── 13 August, 2024.md
-├── 14 August, 2024.md
-├── 8 August, 2024.md
-└── 9 August, 2024.md
+├── 2024-08-08.md
+├── 2024-08-09.md
+├── 2024-08-10.md
+├── 2024-08-11.md
+├── 2024-08-12.md
+├── 2024-08-13.md
+└── 2024-08-14.md
 ```
 
 其中被保留的内容形如：

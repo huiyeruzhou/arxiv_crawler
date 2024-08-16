@@ -6,6 +6,8 @@ from pathlib import Path
 from async_translator import async_translate
 import asyncio
 import aiohttp
+from datetime import datetime
+
 class ArxivScraper:
     def __init__(self, date_from, date_until, 
                  category_blacklist=[], 
@@ -23,7 +25,7 @@ class ArxivScraper:
             category_blacklist (list, optional): 黑名单. Defaults to [].
             category_whitelist (list, optional): 白名单. Defaults to ["cs.CV", "cs.AI", "cs.LG", "cs.CL"]. 
                                                 如果一个文章的分类在黑名单中，且没有任何一个分类在白名单中，则被过滤掉
-            oprional_keywords (list, optional): 关键词, 各词之间关系为OR, 在标题/摘要中至少要出现一个关键词才会被爬取. 详情见
+            oprional_keywords (list, optional): 关键词, 各词之间关系为OR, 在标题/摘要中至少要出现一个关键词才会被爬取. 
                                                 Defaults to ["LLM", "language model", "multimodal", "finetuning", "GPT"].
         """
         self.date_from = date_from
@@ -39,6 +41,14 @@ class ArxivScraper:
         self.oprional_keywords = [kw.replace(' ', '+') for kw in oprional_keywords] # url转义
         self.console = Console()
         self.output_dir = Path("./output_llms")
+    
+    @staticmethod
+    def convert_date(date_str, dateformat='%Y-%m-%d'):
+        # 解析输入的日期字符串,形如"21 July, 2024"
+        date_obj = datetime.strptime(date_str, '%d %B, %Y')
+        # 将日期对象转换为所需的格式
+        formatted_date = date_obj.strftime(dateformat)
+        return formatted_date
     
     def get_url(self, start):
         """
@@ -298,7 +308,7 @@ class ArxivScraper:
             await asyncio.gather(*translates)
 
         self.console.log(f"[bold green]Translating completed. Papers: {len(self.papers)}")
-    def output(self):
+    def output(self, filename_format='%Y-%m-%d'):
         files = {}
         self.output_dir.mkdir(exist_ok=True, parents=True)
 
@@ -306,13 +316,13 @@ class ArxivScraper:
         for paper in self.papers:
             date = paper['date']
             if date not in files:
-                files[date] = open(self.output_dir / f"{date}.md", 'w')
+                files[date] = open(self.output_dir / f"{self.convert_date(date, filename_format)}.md", 'w')
             self.print_paper(paper, files[date])
         # 输出过滤的论文，按日期整理
         for paper in self.filtered_papers:
             date = paper['date']
             if date not in files:
-                files[date] = open(self.output_dir / f"{date}.md", 'w')
+                files[date] = open(self.output_dir / f"{self.convert_date(date, filename_format)}.md", 'w')
             self.print_filtered_paper(paper, files[date])
         for file in files.values():
             file.close()
