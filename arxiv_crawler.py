@@ -1,4 +1,5 @@
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString, Tag
+import re
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn
 import asyncio
@@ -233,7 +234,7 @@ class ArxivScraper(object):
             url = url_tag["href"] if url_tag else "No link"
 
             title_tag = result.find("p", class_="title")
-            title = title_tag.get_text(strip=True) if title_tag else "No title"
+            title = self.parse_search_text(title_tag) if title_tag else "No title"
 
             date_tag = result.find("p", class_="is-size-7")
             date = date_tag.get_text(strip=True) if date_tag else "No date"
@@ -289,7 +290,7 @@ class ArxivScraper(object):
 
             summary_tag = result.find("span", class_="abstract-full")
             abstract = (
-                summary_tag.get_text(strip=True)[: -len("△ Less")]
+                self.parse_search_text(summary_tag)
                 if summary_tag
                 else "No summary"
             )
@@ -305,6 +306,19 @@ class ArxivScraper(object):
                 )
             )
 
+    def parse_search_text(self, tag):
+        string = ""
+        for child in tag.children:
+            if isinstance(child, NavigableString):
+                string += re.sub(r"\s+", " ", child)
+            elif isinstance(child, Tag):
+                if child.name == "span" and "search-hit" in child.get("class"):
+                    string += re.sub(r"\s+", " ", child.get_text(strip=False))
+                elif child.name == "a" and ".style.display" in child.get("onclick"):
+                    pass
+                else:
+                    import pdb; pdb.set_trace()
+        return string
     async def translate(self):
         """
         异步翻译论文的标题和摘要
