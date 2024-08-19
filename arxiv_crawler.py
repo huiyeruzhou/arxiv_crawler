@@ -27,6 +27,8 @@ class ArxivScraper(object):
         """
         一个抓取指定日期范围内的arxiv文章的类,
         搜索基于https://arxiv.org/search/advanced,
+        一个文件被爬取到的条件是：首次提交时间在`date_from`和`date_until`之间，并且包含至少一个关键词。
+        一个文章被详细展示（不被过滤）的条件是：至少有一个领域在白名单中，并且没有任何一个领域在黑名单中。
         翻译基于google-translate
 
         Args:
@@ -34,7 +36,6 @@ class ArxivScraper(object):
             date_until (str): 结束日期(不含当天)
             category_blacklist (list, optional): 黑名单. Defaults to [].
             category_whitelist (list, optional): 白名单. Defaults to ["cs.CV", "cs.AI", "cs.LG", "cs.CL"].
-                                                如果一个文章的分类在黑名单中，且没有任何一个分类在白名单中，则被过滤掉
             optional_keywords (list, optional): 关键词, 各词之间关系为OR, 在标题/摘要中至少要出现一个关键词才会被爬取.
                                                 Defaults to ["LLM", "language model", "multimodal", "finetuning", "GPT"].
         """

@@ -30,12 +30,13 @@ python arxiv_crawler.py
 4. 用法说明
 
 - 要修改爬取的时间范围，领域，关键字，请参考`arxiv_crawler.py`中`ArxivScraper`类的注释：
+  一个文件被爬取到的条件是：首次提交时间在`date_from`和`date_until`之间，并且包含至少一个关键词。
+  一个文章被详细展示（不被过滤）的条件是：至少有一个领域在白名单中，并且没有任何一个领域在黑名单中。
   - Args:
     - date_from (str): 开始日期
     - date_until (str): 结束日期
     - category_blacklist (list, optional): 黑名单. Defaults to [].
     - category_whitelist (list, optional): 白名单. Defaults to ["cs.CV", "cs.AI", "cs.LG", "cs.CL"]. 
-                                        如果一个文章的分类在黑名单中，且没有任何一个分类在白名单中，则被过滤掉
     - optional_keywords (list, optional): 关键词, 各词之间关系为OR, 在标题/摘要中至少要出现一个关键词才会被爬取.
                                         Defaults to ["LLM", "language model", "multimodal", "finetuning", "GPT"].
 
@@ -76,22 +77,27 @@ output_llm
 
 其中被保留的内容形如：
 
-### Simplifying Translations for Children: Iterative Simplification Considering Age of Acquisition withLLMs
-- **标题**: 简化儿童翻译：考虑法学硕士获得年龄的迭代简化
-- **Categories**: cs.CL
-- **摘要**: 近年来，神经机器翻译（NMT）已广泛应用于日常生活中。......
-- **Date**: 8 August, 2024
-- **URL**: https://arxiv.org/abs/2408.04217
-- **Authors**: Masashi Oshika,Makoto Morishita,Tsutomu Hirao,Ryohei Sasano,Koichi Takeda
-- **Abstract**: In recent years, neural machine translation (NMT) has been widely used in everyday life. ......
+# 论文全览：2024-08-16
+
+共有57篇相关领域论文，另有6篇其他论文
+
+## 人工智能(cs.AI:Artificial Intelligence)
+
+### [Fine-tuningLLMsfor Autonomous Spacecraft Control: A Case Study Using Kerbal Space Program](https://arxiv.org/abs/2408.08676)
+> **Authors**: Alejandro Carrasco,Victor Rodriguez-Fernandez,Richard Linares
+> **First submission**: 16 August, 2024
+- **标题**: 用于自主航天器控制的微调LLM：使用坎巴拉太空计划的案例研究
+- **领域**: 人工智能;天体物理学仪器和方法
+- **摘要**: 最近出现的趋势是使用大型语言模型（LLM）作为自主代理，根据用户文本提示的内容采取行动。本研究探索使用微调大型语言模型 (LLM) 进行自主航天器控制，并使用坎巴拉太空计划微分游戏套件 (KSPDG) 作为测试环境。由于模拟能力和数据不足，传统的强化学习（RL）方法在该领域面临局限性。通过利用 LLM，特别是 GPT-3.5 和 LLaMA 等微调模型，我们演示了这些模型如何使用基于语言的输入和输出有效地控制航天器。我们的方法将实时任务遥测集成到LLM处理的文本提示中，然后通过代理生成控制操作。结果引发了一场关于法学硕士在空间操作方面的潜力的讨论，超出了其名义上用于文本相关任务的范围。未来的工作旨在将这种方法扩展到其他空间控制任务，并评估不同法学硕士系列的表现。该代码可通过以下 URL 获取：\texttt{https://github.com/ARCLab-MIT/kspdg}。
+
 
 ...(Some other content)
 
-然后是被过滤掉的内容，会显示它被过滤的原因（命中了哪个黑名单领域）
+然后是被过滤掉的内容，会显示它被过滤的原因（命中了哪个黑名单领域/所有领域都不在白名单当中）
 
-- Are Social Sentiments Inherent inLLMs? An Empirical Study on Extraction of Inter-demographic Sentiments
-  - **Reason**: cat:cs.CY **Categories**: cs.CL cs.CY
-- Learning with Digital Agents: An Analysis based on the Activity Theory
+- [Vulnerability Handling of AI-Generated Code -- Existing Solutions and Open Challenges](https://arxiv.org/abs/2408.08549)
+  - **标题**: 人工智能生成代码的漏洞处理——现有解决方案和开放挑战
+  - **Filtered Reason**: cat:none of ['cs.SE'] in whitelist
 
 ## 相关技术
 
