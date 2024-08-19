@@ -45,7 +45,7 @@ CATS_MAP = {
         "zh-CN": "计算工程、金融和科学",
     },
     "cs.CG": {"en": "Computational Geometry", "zh-CN": "计算几何"},
-    "cs.CL": {"en": "Computation and Language", "zh-CN": "计算和语言"},
+    "cs.CL": {"en": "Computation and Language", "zh-CN": "计算语言学"},
     "cs.CR": {"en": "Cryptography and Security", "zh-CN": "密码学和安全"},
     "cs.CV": {
         "en": "Computer Vision and Pattern Recognition",
@@ -279,6 +279,7 @@ if __name__ == "__main__":
 
         # 机翻结果修正
         domains["cs.GL"]["zh-CN"] = "一般文献"
+        domains["cs.CL"]["zh-CN"] = "计算语言学"
         pprint.pprint(domains)
     else:
         print(f"Failed to retrieve webpage, status code: {response.status_code}")
