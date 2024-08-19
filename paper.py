@@ -50,13 +50,18 @@ class Paper:
         将文章信息转换为markdown格式
         """
         categories = ";".join(parse_categories(self.categories))
+        abstract = (
+            f"- **摘要**: {self.abstract_translated}"
+            if self.abstract_translated
+            else f"- **Abstract**: {self.abstract}"
+        )
         return f"""
 ### [{self.title}]({self.url})
 > **Authors**: {self.authors}
 > **First submission**: {self.date}
 - **标题**: {self.title_translated}
 - **领域**: {categories}
-- **摘要**: {self.abstract_translated}
+{abstract}
 
 """.lstrip()
 
