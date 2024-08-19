@@ -47,11 +47,18 @@ class ArxivScraper(object):
         self.paper_result = PaperResult(date_from, date_until)
         self.category_blacklist = category_blacklist
         self.category_whitelist = category_whitelist
-        self.oprional_keywords = [
+        self.optional_keywords = [
             kw.replace(" ", "+") for kw in optional_keywords
         ]  # url转义
         self.console = Console()
 
+    @property
+    def meta_data(self):
+        """
+        返回搜索的元数据
+        """
+        return dict(repo_url="https://github.com/huiyeruzhou/arxiv_crawler", **self.__dict__)
+    
     @staticmethod
     def convert_date(date_str, dateformat="%Y-%m-%d"):
         # 解析输入的日期字符串,形如"21 July, 2024"
@@ -70,7 +77,7 @@ class ArxivScraper(object):
         # https://arxiv.org/search/advanced?terms-0-operator=AND&terms-0-term=LLM&terms-0-field=all&terms-1-operator=OR&terms-1-term=language+model&terms-1-field=all&terms-2-operator=OR&terms-2-term=multimodal&terms-2-field=all&terms-3-operator=OR&terms-3-term=finetuning&terms-3-field=all&terms-4-operator=AND&terms-4-term=GPT&terms-4-field=all&classification-computer_science=y&classification-physics_archives=all&classification-include_cross_list=include&date-year=&date-filter_by=date_range&date-from_date=2024-08-08&date-to_date=2024-08-15&date-date_type=submitted_date_first&abstracts=show&size=50&order=submitted_date
         kwargs = "".join(
             f"&terms-{i}-operator=OR&terms-{i}-term={kw}&terms-{i}-field=all"
-            for i, kw in enumerate(self.oprional_keywords)
+            for i, kw in enumerate(self.optional_keywords)
         )
         return (
             f"https://arxiv.org/search/advanced?advanced={kwargs}"
@@ -303,8 +310,8 @@ class ArxivScraper(object):
         """
         await self.paper_result.translate()
 
-    def output(self, output_dir="./output_llms", filename_format="%Y-%m-%d"):
-        self.paper_result.output(output_dir, filename_format)
+    def output(self, output_dir="./output_llms", filename_format="%Y-%m-%d", meta=False):
+        self.paper_result.output(output_dir, filename_format, self.meta_data if meta else None)
 
 
 if __name__ == "__main__":
@@ -322,4 +329,4 @@ if __name__ == "__main__":
     )
     asyncio.run(scraper.fetch_all())
     asyncio.run(scraper.translate())
-    scraper.output()
+    scraper.output(meta=True)

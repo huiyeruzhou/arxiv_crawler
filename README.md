@@ -36,7 +36,7 @@ python arxiv_crawler.py
     - category_blacklist (list, optional): 黑名单. Defaults to [].
     - category_whitelist (list, optional): 白名单. Defaults to ["cs.CV", "cs.AI", "cs.LG", "cs.CL"]. 
                                         如果一个文章的分类在黑名单中，且没有任何一个分类在白名单中，则被过滤掉
-    - oprional_keywords (list, optional): 关键词, 各词之间关系为OR, 在标题/摘要中至少要出现一个关键词才会被爬取.
+    - optional_keywords (list, optional): 关键词, 各词之间关系为OR, 在标题/摘要中至少要出现一个关键词才会被爬取.
                                         Defaults to ["LLM", "language model", "multimodal", "finetuning", "GPT"].
 
    
@@ -50,6 +50,16 @@ asyncio.run(scraper.translate())
 scraper.output(filename_format='%Y-%m-%d')
 ```
 
+- 如果你希望将一条元信息添加到输出文件中，可以使用`output`方法的`meta`参数。
+```py
+scraper.output(meta=True)
+```
+
+元信息形如：
+> 本文由 [https://github.com/huiyeruzhou/arxiv_crawler](https://github.com/huiyeruzhou/arxiv_crawler) 自动生成
+>
+> 领域白名单: cs.CV;cs.AI;cs.LG;cs.CL;cs.IR
+> 关键词： LLM, LLMs, language+model, language+models, multimodal, finetuning, GPT
 ## 结果示例
 
 假设爬取了七天的论文，那么结果可能形如：

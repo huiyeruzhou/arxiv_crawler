@@ -8,6 +8,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn
 from categories import parse_categories
 
+
 @dataclass
 class PaperFiltered:
     date: str
@@ -135,9 +136,22 @@ class PaperResult(object):
 
         self.console.log(f"[bold green]Translating completed.")
 
-    def output(self, output_dir, filename_format):
+    def output(self, output_dir, filename_format, metadata):
         output_dir = Path(output_dir)
         output_dir.mkdir(exist_ok=True, parents=True)
+        if metadata:
+            repo_url = metadata["repo_url"]
+            categories = ";".join(metadata["category_whitelist"])
+            optional_keywords = ", ".join(metadata["optional_keywords"])
+            preface_str = f"""
+> 本文由 [{repo_url}]({repo_url}) 自动生成
+>
+> 领域白名单：{categories}
+> 关键词： {optional_keywords}
+
+""".lstrip()
+        else:
+            preface_str = ""
 
         for i in range(self.days):
             current = self.date_from + i * timedelta(days=1)
@@ -148,7 +162,7 @@ class PaperResult(object):
                 chosen = self.chosen_dict[current_key]
                 filtered = self.filtered_dict[current_key]
                 chosen_cnt = sum(len(papers) for papers in chosen.values())
-                preface_str = f"# 论文全览：{current_filename}\n\n共有{chosen_cnt}篇相关领域论文，另有{len(filtered)}篇其他论文\n\n"
+                preface_str += f"# 论文全览：{current_filename}\n\n共有{chosen_cnt}篇相关领域论文，另有{len(filtered)}篇其他论文\n\n"
 
                 papers_str = ""
                 for category in sorted(chosen.keys()):
