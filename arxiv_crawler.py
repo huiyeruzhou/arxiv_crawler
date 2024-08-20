@@ -5,6 +5,7 @@ from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn
 import asyncio
 import aiohttp
 from datetime import datetime
+from typing_extensions import Literal
 from paper import PaperDatabase, Paper
 
 
@@ -17,6 +18,8 @@ class ArxivScraper(object):
         category_whitelist=["cs.CV", "cs.AI", "cs.LG", "cs.CL", "cs.IR", "cs.MA"],
         optional_keywords=["LLM", "LLMs", "language model", "language models", "multimodal", "finetuning", "GPT"],
         trans_to="zh-CN",
+        filt_date_type: Literal["submitted_date_first", "announced_date_first"] = "submitted_date_first",
+        proxy=None
     ):
         """
         一个抓取指定日期范围内的arxiv文章的类,
@@ -33,19 +36,25 @@ class ArxivScraper(object):
             optional_keywords (list, optional): 关键词, 各词之间关系为OR, 在标题/摘要中至少要出现一个关键词才会被爬取.
                 Defaults to [ "LLM", "LLMs", "language model", "language models", "multimodal", "finetuning", "GPT"]
             trans_to: 翻译的目标语言, 若设为可转换为False的值则不会翻译
+            filt_date_type (Literal["submitted_date_first", "announced_date_first"], optional): 日期筛选方式. Defaults to "submitted_date_first".
+                注意，如果指定为"announced_date_first"，则会按照公布日期筛选，这样的筛选是最全的，但日期**只有年月部分**有效，日部分会被忽略。
+            proxy (str | None, optional): 用于翻译和爬取arxiv时要使用的代理, 通常是http://127.0.0.1:7890. Defaults to None
         """
         self.date_from = date_from  # url
         self.date_until = date_until  # url
         self.category_blacklist = category_blacklist  # used as metadata
         self.category_whitelist = category_whitelist  # used as metadata
-        self.paper_db = PaperDatabase(date_from, date_until, category_blacklist, category_whitelist)
+        self.optional_keywords = [kw.replace(" ", "+") for kw in optional_keywords]  # url转义
+        self.filt_date_by = filt_date_type
         self.trans_to = trans_to  # translate
-        self.filter_date_by = "submitted_date_first"  # url(默认按首次提交日期过滤)
+        self.proxy = proxy
+        
         self.order = "-announced_date_first"  # url(结果默认按首次公布日期的降序排列，这样最新公布的会在前面)
         self.total = None  # fetch_all
         self.step = 50  # url, fetch_all
-        self.papers = []  # fetch_all
-        self.optional_keywords = [kw.replace(" ", "+") for kw in optional_keywords]  # url转义
+        self.papers: list[Paper] = []  # fetch_all
+
+        self.paper_db = PaperDatabase(date_from, date_until, category_blacklist, category_whitelist)
         self.console = Console()
 
     @property
@@ -61,12 +70,13 @@ class ArxivScraper(object):
 
         Args:
             start (int): 返回结果的起始序号, 每个页面只会包含序号为[start, start+50)的文章
+            filter_date_by (str, optional): 日期筛选方式. Defaults to "submitted_date_first".
         """
         # https://arxiv.org/search/advanced?terms-0-operator=AND&terms-0-term=LLM&terms-0-field=all&terms-1-operator=OR&terms-1-term=language+model&terms-1-field=all&terms-2-operator=OR&terms-2-term=multimodal&terms-2-field=all&terms-3-operator=OR&terms-3-term=finetuning&terms-3-field=all&terms-4-operator=AND&terms-4-term=GPT&terms-4-field=all&classification-computer_science=y&classification-physics_archives=all&classification-include_cross_list=include&date-year=&date-filter_by=date_range&date-from_date=2024-08-08&date-to_date=2024-08-15&date-date_type=submitted_date_first&abstracts=show&size=50&order=submitted_date
         kwargs = "".join(f"&terms-{i}-operator=OR&terms-{i}-term={kw}&terms-{i}-field=all" for i, kw in enumerate(self.optional_keywords))
         return (
             f"https://arxiv.org/search/advanced?advanced={kwargs}"
-            + f"&classification-computer_science=y&classification-physics_archives=all&classification-include_cross_list=include&date-year=&date-filter_by=date_range&date-from_date={self.date_from}&date-to_date={self.date_until}&date-date_type={self.filter_date_by}&abstracts=show&size={self.step}&order={self.order}&start={start}"
+            + f"&classification-computer_science=y&classification-physics_archives=all&classification-include_cross_list=include&date-year=&date-filter_by=date_range&date-from_date={self.date_from}&date-to_date={self.date_until}&date-date_type={self.filt_date_by}&abstracts=show&size={self.step}&order={self.order}&start={start}"
         )
 
     async def fetch_all(self):
@@ -74,7 +84,7 @@ class ArxivScraper(object):
         (aio)获取所有文章
         """
         # 获取前50篇文章并记录总数
-        self.console.log("[bold green]Fetching for the first time...")
+        self.console.log(f"[bold green]Fetching the first {self.step} papers...")
         self.console.print(f"[grey] {self.get_url(0)}")
         content = await self.request(0)
         self.parse_search_html(content)
@@ -110,6 +120,36 @@ class ArxivScraper(object):
             await self.translate()
         self.paper_db.add_papers(self.papers)
 
+    def fetch_update(self):
+        """
+        更新文章, 这会从最新公布的文章开始更新, 直到遇到已经爬取过的文章为止。
+        为了效率，建议在运行fetch_all后再运行fetch_update
+        """
+        self.console.log(f"[bold green]Updating the first {self.step} papers...")
+        self.console.print(f"[grey] {self.get_url(0)}")
+
+        content = asyncio.run(self.request(0))
+        self.parse_search_html(content)
+        continue_update = self.update_and_clear_papers()
+        for start in range(self.step, self.total, self.step):
+            if not continue_update:
+                break
+
+            content = asyncio.run(self.request(start))
+            self.parse_search_html(content)
+            continue_update = self.update_and_clear_papers()
+
+            self.console.log(f"[bold green]Updating the {start}-{start+50} papers...")
+        self.console.log("[bold green]Updating completed.")
+        return
+
+    def update_and_clear_papers(self):
+        if self.trans_to:
+            asyncio.run(self.translate())
+        continue_update = self.paper_db.update_papers(self.papers)
+        self.papers = []
+        return continue_update
+
     async def request(self, start):
         """
         异步请求网页，重试至多3次
@@ -118,14 +158,15 @@ class ArxivScraper(object):
         url = self.get_url(start)
         while error <= 3:
             try:
-                async with aiohttp.ClientSession(trust_env=True) as session:
-                    async with session.get(url) as response:
+                async with aiohttp.ClientSession(trust_env=True, read_timeout=10) as session:
+                    async with session.get(url, proxy=self.proxy) as response:
                         response.raise_for_status()
                         content = await response.text()
                         return content
             except Exception as e:
                 error += 1
-                self.console.log(f"[bold red]Request {start} cause error: {e}")
+                self.console.log(f"[bold red]Request {start} cause error: ")
+                self.console.print_exception()
                 self.console.log(f"[bold red]Retrying {start}... {error}/3")
 
     def parse_search_html(self, content):

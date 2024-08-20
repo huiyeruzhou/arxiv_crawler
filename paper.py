@@ -124,9 +124,12 @@ class PaperDatabase:
             )
 
     def add_papers(self, papers: list[Paper]):
-        self.store_papers_to_db(papers)
+        """
+        向数据库中插入所有论文信息，如果数据库中已经存在相同的url，则会被覆盖
 
-    def store_papers_to_db(self, papers: list[Paper]):
+        Args:
+            papers (list[Paper]): 论文列表
+        """
         with self.conn:
             # 创建一个要插入的数据列表
             data_to_insert = [
@@ -154,7 +157,45 @@ class PaperDatabase:
                 data_to_insert,
             )
 
+    def update_papers(self, papers: list[Paper])-> bool:
+        """
+        尝试向数据库中插入新的论文信息，如果遇到了已有的论文，在此之前的论文会被插入，剩余的都不会被插入。
+        返回是否全部插入成功。
+
+        Args:
+            papers (list[Paper]): 论文列表
+
+        Returns:
+            bool: 是否全部插入成功，可用于增量更新的flag
+        """
+        new_papers = []
+        continue_update = True
+        for paper in papers:
+            with self.conn:
+                cursor = self.conn.execute(
+                    """
+                    SELECT * FROM papers WHERE url = ?
+                    """,
+                    (paper.url,),
+                )
+                if cursor.fetchone():
+                    continue_update = False
+                    break
+                else:
+                    new_papers.append(paper)
+        self.add_papers(new_papers)
+        return continue_update
+
     def fetch_papers_on_date(self, date: datetime) -> tuple[list[PaperRecord], list[PaperRecord]]:
+        """
+        获取某一天提交的所有论文信息，以初次提交日期为准。返回PaperRecord列表构成的元组，第一个元素为选中的论文，第二个元素为被过滤的论文
+
+        Args:
+            date (datetime): 日期
+
+        Returns:
+            tuple[list[PaperRecord], list[PaperRecord]]: 选中的论文和被过滤的论文
+        """
         with self.conn:
             cursor = self.conn.execute(
                 """
@@ -168,9 +209,11 @@ class PaperDatabase:
         chosen_paper_records = []
         for paper in papers:
             categories = set(paper.categories)
+            # 没有任何一个领域在白名单中
             if not (self.categories_whitelist & categories):
                 categories_str = ",".join(categories)
                 filtered_paper_records.append(PaperRecord(paper, f"none of {categories_str} in whitelist"))
+            # 至少有一个领域在黑名单中
             elif black := self.categories_blacklist & categories:
                 black_str = ",".join(black)
                 filtered_paper_records.append(PaperRecord(paper, f"cat:{black_str} in blacklist"))
@@ -179,6 +222,14 @@ class PaperDatabase:
         return chosen_paper_records, filtered_paper_records
 
     def to_markdown(self, output_dir="./output_llms", filename_format="%Y-%m-%d", metadata=None):
+        """
+        将数据库中的论文信息输出为markdown格式
+        
+        Args:
+            output_dir (str, optional): 输出目录. Defaults to "./output_llms".
+            filename_format (str, optional): 文件名格式. Defaults to "%Y-%m-%d".
+            metadata (dict, optional): 一些元数据，用于生成文章前言. Defaults to None.
+        """
         output_dir = Path(output_dir)
         output_dir.mkdir(exist_ok=True, parents=True)
 
@@ -226,6 +277,15 @@ class PaperDatabase:
             )
 
     def to_csv(self, output_dir="./output_llms", filename_format="%Y-%m-%d", csv_config={}):
+        """将数据库中的论文信息输出为csv格式
+
+        Args:
+            output_dir (str, optional): 输出文件夹. Defaults to "./output_llms".
+            filename_format (str, optional): 日期转换为文件名字符串的格式. Defaults to "%Y-%m-%d".
+            csv_config (dict, optional): csv的格式. Defaults to {}.
+                其中，header (bool): 是否输出表头
+                剩余的参数原样传递给csv.writer
+        """
         output_dir = Path(output_dir)
         output_dir.mkdir(exist_ok=True, parents=True)
 
@@ -254,7 +314,9 @@ class PaperDatabase:
 
             with open(output_dir / f"{current_filename}.csv", "w", encoding="utf-8") as file:
                 header = csv_config.pop("header", True)
-                writer = csv.writer(file, **csv_config, lineterminator="\n")
+                if "lineterminator" not in csv_config:
+                    csv_config["lineterminator"] = "\n"
+                writer = csv.writer(file, **csv_config)
                 if header:
                     writer.writerow(headers)
 

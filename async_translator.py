@@ -66,7 +66,7 @@ def TL(a):
     return str(a) + jd + str(int(a) ^ int(b))
 
 
-async def async_google_translate(data, url="https://translate.googleapis.com"):
+async def async_google_translate(data, url="https://translate.googleapis.com", proxy=None):
     """
     参考zotero翻译插件的代码
     https://github.com/windingwind/zotero-pdf-translate/blob/main/src/modules/services/google.ts
@@ -77,6 +77,7 @@ async def async_google_translate(data, url="https://translate.googleapis.com"):
             async with aiohttp.ClientSession(trust_env=True) as session:
                 async with session.get(
                     f"{data.secret if data.secret else url}/translate_a/single",
+                    proxy=proxy,
                     params={
                         "client": "gtx",
                         "hl": "zh-CN",
@@ -117,13 +118,13 @@ async def async_google_translate(data, url="https://translate.googleapis.com"):
             pass
 
 
-async def async_translate(text, langto="zh-CN"):
+async def async_translate(text, langto="zh-CN", proxy=None):
     task = TranslateTask(raw=text, langto=langto)
-    await async_google_translate(task)
+    await async_google_translate(task, proxy=proxy)
     return task.result
 
 
-def google_translate(data, url="https://translate.googleapis.com"):
+def google_translate(data, url="https://translate.googleapis.com", proxy=None):
     response = requests.get(
         f"{data.secret if data.secret else url}/translate_a/single",
         params={
@@ -139,6 +140,9 @@ def google_translate(data, url="https://translate.googleapis.com"):
             "sl": data.langfrom,
             "tl": data.langto,
         },
+        proxies={
+            "https": proxy
+        }
     )
 
     response.raise_for_status()  # 交由requests抛出异常
@@ -151,16 +155,17 @@ def google_translate(data, url="https://translate.googleapis.com"):
     data.result = result
 
 
-def translate(text, langto="zh-CN"):
+def translate(text, langto="zh-CN", proxy=None):
     task = TranslateTask(raw=text, langto=langto)
-    google_translate(task)
+    google_translate(task, proxy=proxy)
     return task.result
 
 
 # 示例Demo
-async def main():
-    text = await async_translate("Hello, world!")
-    print(f"Translated text: {text}")
+async def main(proxy="http://127.0.0.1:7890"):
+    text = await async_translate("Hello, world!", proxy=proxy)
+    print(f"Async Translated text: {text}")
+    print("Translated text:", translate("hello world", proxy=proxy))
 
 
 if __name__ == "__main__":
