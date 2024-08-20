@@ -328,12 +328,15 @@ class ArxivScraper(object):
     def output(self, output_dir="./output_llms", filename_format="%Y-%m-%d", meta=False):
         self.paper_result.output(output_dir, filename_format, self.meta_data if meta else None)
 
+    def to_csv(self, output_dir="./output_llms", filename_format="%Y-%m-%d", csv_config={}):
+        self.paper_result.to_csv(output_dir, filename_format, csv_config)
+
 
 if __name__ == "__main__":
     from datetime import date, timedelta
 
     today = date.today()
-    recent = today - timedelta(days=3)
+    recent = today - timedelta(days=1)
 
     date_from = recent.strftime("%Y-%m-%d")
     data_until = today.strftime("%Y-%m-%d")

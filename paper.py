@@ -181,3 +181,49 @@ class PaperResult(object):
         self.console.log(
             f"[bold green]Output markdown files completed. {self.days} files in total."
         )
+
+    def to_csv(self, output_dir="./output_llms", filename_format="%Y-%m-%d", csv_config={}):
+        import csv
+        from pathlib import Path
+        from datetime import timedelta
+    
+        output_dir = Path(output_dir)
+        output_dir.mkdir(exist_ok=True, parents=True)
+        
+        csv_table = {
+            "Title": lambda paper: paper.title,
+            "Interest": lambda paper: "filtered" if isinstance(paper, PaperFiltered) else "chosen",
+            "Title Translated": lambda paper: getattr(paper, 'title_translated', "-"),
+            "Categories": lambda paper: ",".join(paper.categories),
+            "Authors": lambda paper: getattr(paper, 'authors', "-"),
+            "URL": lambda paper: paper.url,
+            "Date": lambda paper: current.strftime("%Y/%m/%d"),
+            "Abstract": lambda paper: getattr(paper, 'abstract', "-"),
+            "Abstract Translated": lambda paper: getattr(paper, 'abstract_translated', "-"),
+            "Comment": lambda paper: getattr(paper, 'reason', "-")
+        }
+        
+        headers = list(csv_table.keys())
+        
+        for i in range(self.days):
+            current = self.date_from + i * timedelta(days=1)
+            current_filename = current.strftime(filename_format)
+            current_key = current.strftime("%d %B, %Y")
+    
+            with open(output_dir / f"{current_filename}.csv", "w") as file:
+                header = csv_config.pop("header", True)
+                writer = csv.writer(file, **csv_config)
+                if header:
+                    writer.writerow(headers)
+                
+                chosen = self.chosen_dict[current_key]
+                filtered = self.filtered_dict[current_key]
+                
+                for category, papers in chosen.items():
+                    for paper in papers:
+                        writer.writerow([csv_table[col](paper) for col in headers])
+                
+                for paper in filtered:
+                    writer.writerow([csv_table[col](paper) for col in headers])
+        
+        self.console.log(f"[bold green]Output CSV files completed. {self.days} files in total.")
