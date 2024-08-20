@@ -5,14 +5,17 @@
 通过进行异步网络请求，这个爬虫能够在两分钟之内爬取并翻译2000篇文章的标题和摘要信息，并且将其输出为精美的markdown文件
 
 下列示意中，系统用4s爬取并翻译了2024年8月19日的全部70篇文章，并根据其领域过滤了其中的6篇。并将结果输出到`output_llms/2024-08-19.md`中。
-![alt text](readme/image-9.png)
+![alt text](readme/cli_demo.png)
 
 markdown示意：
-![alt text](readme/image-2.png)
+<div style="text-align: center;">
+    <img src="readme/markdown_demo.png" alt="markdown demo" style="width: 60%; height: auto;" />
+</div>
+
 
 还可以配合飞书进行使用，实现方便的阅读和筛选，详情见[配合飞书的进阶用法](#配合飞书的进阶用法)
 
-![alt text](readme/image-8.png)
+![alt text](readme/lark_demo.png)
 
 ## 基本用法：爬取论文为markdown
 
@@ -123,7 +126,7 @@ output_llms
 
 得益于飞书文档提供的[多维表格](https://www.feishu.cn/hc/zh-CN/category/6933474572494716956-%E5%A4%9A%E7%BB%B4%E8%A1%A8%E6%A0%BC)功能，我们可以将论文信息转换为看板视图，以获得极尽丝滑的体验：
 
-![alt text](readme/img_v3_02du_f323888e-5f01-491e-8f10-d164b7247f9g.jpg)
+![alt text](readme/lark_demo.png)
 
 文章的信息一览无余，我们还可以根据自己的兴趣对文章进行粗筛，然后阅读自己最感兴趣的文章，如此大大提升了我们的科研效率。
 
@@ -157,7 +160,7 @@ scraper.to_csv(csv_config=dict(delimiter="\t", header=False))
 
 表格视图就是我们csv文件的内容，其中title作为索引，interest列是一个单选列，初始的interest只有两种，一种是chosen，另一种是filtered，分别对应于被保留和被过滤的文章。在阅读的过程中，可以根据自己的研究方向和兴趣进行筛选。categories是文章在arxiv上的领域tag，是一个多选列，飞书表格会自动将以逗号分隔的多选内容拆解开，实现自动识别。
 
-![alt text](readme/image.png)
+![alt text](readme/lark_table_view.png)
 
 切换到看板视图之后，就可以开始阅读和过滤文章了，这里我预设了5个等级的文章：
 - CORE：表示scaling law这种经典文章，小同行的文章
@@ -166,21 +169,21 @@ scraper.to_csv(csv_config=dict(delimiter="\t", header=False))
 - INTERESTING：和自己的科研领域方向较远，但比较有趣
 - IRRELEVANT：比较trival的其他领域文章
 
-![alt text](readme/image-3.png)
+![alt text](readme/lark_card_view.png)
 
 ### 3.复制csv内容
 
 首先找到输出的文件，比如`output_llms/2024-08-19.csv`，记录一下它一共有多少行，全选并复制
-![alt text](readme/image-4.png)
+![alt text](readme/csv_demo.png)
 
 接下来复制一份数据表，但是只复制其结构
 <div style="display: flex; justify-content: space-between;">
-    <img src="readme/image-5.png" alt="Image 1" style="width: 48%;height: auto"/>
-    <img src="readme/image-6.png" alt="Image 2" style="width: 48%;height: auto"/>
+    <img src="readme/lark_copy_datasheet.png" alt="Image 1" style="width: 48%;height: auto"/>
+    <img src="readme/lark_copy_datasheet2.png" alt="Image 2" style="width: 48%;height: auto"/>
 </div>
 
 在副本里插入和csv文件相等行数的内容。
-![alt text](readme/image-7.png)
+![alt text](readme/lark_new_datasheet.png)
 
 然后`ctrl+a`全选再`ctrl+v`粘贴到表格中即可！
 
