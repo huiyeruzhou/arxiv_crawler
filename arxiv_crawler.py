@@ -5,7 +5,7 @@ from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn
 import asyncio
 import aiohttp
 from datetime import datetime
-from paper import PaperResult, PaperFiltered, Paper
+from paper import PaperDatabase, Paper
 
 
 class ArxivScraper(object):
@@ -16,6 +16,7 @@ class ArxivScraper(object):
         category_blacklist=[],
         category_whitelist=["cs.CV", "cs.AI", "cs.LG", "cs.CL", "cs.IR", "cs.MA"],
         optional_keywords=["LLM", "LLMs", "language model", "language models", "multimodal", "finetuning", "GPT"],
+        trans_to="zh-CN",
     ):
         """
         一个抓取指定日期范围内的arxiv文章的类,
@@ -30,17 +31,20 @@ class ArxivScraper(object):
             category_blacklist (list, optional): 黑名单. Defaults to [].
             category_whitelist (list, optional): 白名单. Defaults to ["cs.CV", "cs.AI", "cs.LG", "cs.CL", "cs.IR", "cs.MA"].
             optional_keywords (list, optional): 关键词, 各词之间关系为OR, 在标题/摘要中至少要出现一个关键词才会被爬取.
-            Defaults to
+                Defaults to [ "LLM", "LLMs", "language model", "language models", "multimodal", "finetuning", "GPT"]
+            trans_to: 翻译的目标语言, 若设为可转换为False的值则不会翻译
         """
-        self.date_from = date_from
-        self.date_until = date_until
-        self.filter_date_by = "submitted_date_first"  # 默认按首次提交日期过滤
-        self.order = "submitted_date"  # 结果默认按首次提交日期的升序排列
-        self.total = None
-        self.step = 50
-        self.paper_result = PaperResult(date_from, date_until)
-        self.category_blacklist = category_blacklist
-        self.category_whitelist = category_whitelist
+        self.date_from = date_from  # url
+        self.date_until = date_until  # url
+        self.category_blacklist = category_blacklist  # used as metadata
+        self.category_whitelist = category_whitelist  # used as metadata
+        self.paper_db = PaperDatabase(date_from, date_until, category_blacklist, category_whitelist)
+        self.trans_to = trans_to  # translate
+        self.filter_date_by = "submitted_date_first"  # url(默认按首次提交日期过滤)
+        self.order = "-announced_date_first"  # url(结果默认按首次公布日期的降序排列，这样最新公布的会在前面)
+        self.total = None  # fetch_all
+        self.step = 50  # url, fetch_all
+        self.papers = []  # fetch_all
         self.optional_keywords = [kw.replace(" ", "+") for kw in optional_keywords]  # url转义
         self.console = Console()
 
@@ -51,14 +55,6 @@ class ArxivScraper(object):
         """
         return dict(repo_url="https://github.com/huiyeruzhou/arxiv_crawler", **self.__dict__)
 
-    @staticmethod
-    def convert_date(date_str, dateformat="%Y-%m-%d"):
-        # 解析输入的日期字符串,形如"21 July, 2024"
-        date_obj = datetime.strptime(date_str, "%d %B, %Y")
-        # 将日期对象转换为所需的格式
-        formatted_date = date_obj.strftime(dateformat)
-        return formatted_date
-
     def get_url(self, start):
         """
         获取用于搜索的url
@@ -67,10 +63,7 @@ class ArxivScraper(object):
             start (int): 返回结果的起始序号, 每个页面只会包含序号为[start, start+50)的文章
         """
         # https://arxiv.org/search/advanced?terms-0-operator=AND&terms-0-term=LLM&terms-0-field=all&terms-1-operator=OR&terms-1-term=language+model&terms-1-field=all&terms-2-operator=OR&terms-2-term=multimodal&terms-2-field=all&terms-3-operator=OR&terms-3-term=finetuning&terms-3-field=all&terms-4-operator=AND&terms-4-term=GPT&terms-4-field=all&classification-computer_science=y&classification-physics_archives=all&classification-include_cross_list=include&date-year=&date-filter_by=date_range&date-from_date=2024-08-08&date-to_date=2024-08-15&date-date_type=submitted_date_first&abstracts=show&size=50&order=submitted_date
-        kwargs = "".join(
-            f"&terms-{i}-operator=OR&terms-{i}-term={kw}&terms-{i}-field=all"
-            for i, kw in enumerate(self.optional_keywords)
-        )
+        kwargs = "".join(f"&terms-{i}-operator=OR&terms-{i}-term={kw}&terms-{i}-field=all" for i, kw in enumerate(self.optional_keywords))
         return (
             f"https://arxiv.org/search/advanced?advanced={kwargs}"
             + f"&classification-computer_science=y&classification-physics_archives=all&classification-include_cross_list=include&date-year=&date-filter_by=date_range&date-from_date={self.date_from}&date-to_date={self.date_until}&date-date_type={self.filter_date_by}&abstracts=show&size={self.step}&order={self.order}&start={start}"
@@ -112,10 +105,10 @@ class ArxivScraper(object):
                 fetch_tasks.append(wrapper(start))
             await asyncio.gather(*fetch_tasks)
 
-        self.console.log(
-            f"[bold green]Fetching completed. Papers: {self.paper_result.chosen_cnt} "
-            f"({self.paper_result.filtered_cnt} filtered)"
-        )
+        self.console.log(f"[bold green]Fetching completed. ")
+        if self.trans_to:
+            await self.translate()
+        self.paper_db.add_papers(self.papers)
 
     async def request(self, start):
         """
@@ -125,7 +118,7 @@ class ArxivScraper(object):
         url = self.get_url(start)
         while error <= 3:
             try:
-                async with aiohttp.ClientSession() as session:
+                async with aiohttp.ClientSession(trust_env=True) as session:
                     async with session.get(url) as response:
                         response.raise_for_status()
                         content = await response.text()
@@ -207,12 +200,13 @@ class ArxivScraper(object):
         soup = BeautifulSoup(content, "html.parser")
         if not self.total:
             total = soup.select("#main-container > div.level.is-marginless > div.level-left > h1")[0].text
-            # "Showing 1–50 of 2,542,002 results"
+            # "Showing 1–50 of 2,542,002 results" or "Sorry, your query returned no results"
+            if "Sorry" in total:
+                self.total = 0
+                return
             total = int(total[total.find("of") + 3 : total.find("results")].replace(",", ""))
             self.total = total
 
-        papers = []
-        filtered_papers = []
         results = soup.find_all("li", {"class": "arxiv-result"})
         for result in results:
 
@@ -236,36 +230,7 @@ class ArxivScraper(object):
                 date = date[submit_date + 9 : date.find(";", submit_date)]
 
             category_tag = result.find_all("span", class_="tag")
-            categories = [
-                category.get_text(strip=True) for category in category_tag if "tooltip" in category.get("class")
-            ]
-            filtered = False
-            for category in categories:
-                if category in self.category_blacklist:
-                    self.paper_result.add_filtered(
-                        PaperFiltered(
-                            date=date,
-                            title=title,
-                            categories=categories,
-                            url=url,
-                            reason=f"cat:{category} in blacklist",
-                        )
-                    )
-                    filtered = True
-                    break
-            if filtered:
-                continue
-            if not any([category in self.category_whitelist for category in categories]):
-                self.paper_result.add_filtered(
-                    PaperFiltered(
-                        date=date,
-                        title=title,
-                        categories=categories,
-                        url=url,
-                        reason=f"cat:none of {categories} in whitelist",
-                    )
-                )
-                continue
+            categories = [category.get_text(strip=True) for category in category_tag if "tooltip" in category.get("class")]
 
             authors_tag = result.find("p", class_="authors")
             authors = authors_tag.get_text(strip=True)[len("Authors:") :] if authors_tag else "No authors"
@@ -273,12 +238,12 @@ class ArxivScraper(object):
             summary_tag = result.find("span", class_="abstract-full")
             abstract = self.parse_search_text(summary_tag) if summary_tag else "No summary"
 
-            self.paper_result.add_chosen(
+            self.papers.append(
                 Paper(
-                    date=date,
-                    title=title,
-                    categories=categories,
                     url=url,
+                    title=title,
+                    first_submitted_date=datetime.strptime(date, "%d %B, %Y"),
+                    categories=categories,
                     authors=authors,
                     abstract=abstract,
                 )
@@ -301,16 +266,33 @@ class ArxivScraper(object):
         return string
 
     async def translate(self):
-        """
-        异步翻译论文的标题和摘要
-        """
-        await self.paper_result.translate()
+        if not self.trans_to:
+            raise ValueError("No target language specified.")
+        self.console.log("[bold green]Translating...")
+        with Progress(
+            SpinnerColumn(),
+            *Progress.get_default_columns(),
+            TimeElapsedColumn(),
+            console=self.console,
+            transient=False,
+        ) as p:
+            total = len(self.papers)
+            task = p.add_task(
+                description=f"[bold green]Translating {total} papers",
+                total=total,
+            )
+
+            async def worker(paper):
+                await paper.translate(langto=self.trans_to)
+                p.update(task, advance=1)
+
+            await asyncio.gather(*[worker(paper) for paper in self.papers])
 
     def to_markdown(self, output_dir="./output_llms", filename_format="%Y-%m-%d", meta=False):
-        self.paper_result.to_markdown(output_dir, filename_format, self.meta_data if meta else None)
+        self.paper_db.to_markdown(output_dir, filename_format, self.meta_data if meta else None)
 
     def to_csv(self, output_dir="./output_llms", filename_format="%Y-%m-%d", csv_config={}):
-        self.paper_result.to_csv(output_dir, filename_format, csv_config)
+        self.paper_db.to_csv(output_dir, filename_format, csv_config)
 
 
 if __name__ == "__main__":
@@ -327,5 +309,4 @@ if __name__ == "__main__":
         date_until=data_until,
     )
     asyncio.run(scraper.fetch_all())
-    asyncio.run(scraper.translate())
     scraper.to_markdown(meta=True)

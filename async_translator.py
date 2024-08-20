@@ -2,7 +2,6 @@ import aiohttp
 import asyncio
 import requests
 
-
 class TranslateTask:
     def __init__(self, raw, langfrom="en", langto="zh-CN", result=None, secret=None):
         self.langfrom = langfrom
@@ -75,7 +74,7 @@ async def async_google_translate(data, url="https://translate.googleapis.com"):
     error = 0
     while error <= 3:
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(trust_env=True) as session:
                 async with session.get(
                     f"{data.secret if data.secret else url}/translate_a/single",
                     params={
@@ -113,7 +112,7 @@ async def async_google_translate(data, url="https://translate.googleapis.com"):
 
                     data.result = result
                 return
-        except:
+        except Exception as e:
             error += 1
             pass
 
@@ -160,9 +159,8 @@ def translate(text, langto="zh-CN"):
 
 # 示例Demo
 async def main():
-    task = TranslateTask(raw="Hello, world!")
-    await async_translate(task, "https://translate.googleapis.com")
-    print(f"Translated text: {task.result}")
+    text = await async_translate("Hello, world!")
+    print(f"Translated text: {text}")
 
 
 if __name__ == "__main__":
