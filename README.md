@@ -4,15 +4,15 @@
 
 通过进行异步网络请求，这个爬虫能够在两分钟之内爬取并翻译2000篇文章的标题和摘要信息，并且将其输出为精美的markdown文件
 
-下列示意中，系统用4s爬取并翻译了2024年8月19日的全部63篇文章，并根据其领域过滤了其中的7篇。并将结果输出到`output_llms/2024-08-19.md`中。
-![alt text](readme/image-1.png)
+下列示意中，系统用4s爬取并翻译了2024年8月19日的全部70篇文章，并根据其领域过滤了其中的6篇。并将结果输出到`output_llms/2024-08-19.md`中。
+![alt text](readme/image-9.png)
 
 markdown示意：
 ![alt text](readme/image-2.png)
 
 还可以配合飞书进行使用，实现方便的阅读和筛选，详情见[配合飞书的进阶用法](#配合飞书的进阶用法)
 
-![alt text](readme/img_v3_02du_f323888e-5f01-491e-8f10-d164b7247f9g.jpg)
+![alt text](readme/image-8.png)
 
 ## 基本用法：爬取论文为markdown
 
@@ -48,9 +48,9 @@ python arxiv_crawler.py
     - date_from (str): 开始日期
     - date_until (str): 结束日期
     - category_blacklist (list, optional): 黑名单. Defaults to [].
-    - category_whitelist (list, optional): 白名单. Defaults to ["cs.CV", "cs.AI", "cs.LG", "cs.CL"]. 
+    - category_whitelist (list, optional): 白名单. Defaults to ["cs.CV", "cs.AI", "cs.LG", "cs.CL", "cs.IR", "cs.MA"]. 
     - optional_keywords (list, optional): 关键词, 各词之间关系为OR, 在标题/摘要中至少要出现一个关键词才会被爬取.
-                                        Defaults to ["LLM", "language model", "multimodal", "finetuning", "GPT"].
+      Defaults to [ "LLM", "LLMs", "language model", "language models", "multimodal", "finetuning", "GPT"]
 
    
 - 如果你不需要翻译，只需要注释掉
@@ -60,12 +60,12 @@ asyncio.run(scraper.translate())
 
 - 输出文件名是根据日期生成的，可以使用`output`方法的`filename_format`参数修改日期格式，默认为`%Y-%m-%d`即形如`2024-08-08.md`。
 ```py
-scraper.output(filename_format='%Y-%m-%d')
+scraper.to_markdown(filename_format='%Y-%m-%d')
 ```
 
 - 如果你希望将一条元信息添加到输出文件中，可以使用`output`方法的`meta`参数。
 ```py
-scraper.output(meta=True)
+scraper.to_markdown(meta=True)
 ```
 
 元信息形如：
@@ -78,7 +78,7 @@ scraper.output(meta=True)
 
 假设爬取了七天的论文，那么结果可能形如：
 ```bash
-output_llm
+output_llms
 ├── 2024-08-08.md
 ├── 2024-08-09.md
 ├── 2024-08-10.md

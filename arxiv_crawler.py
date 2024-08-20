@@ -14,16 +14,8 @@ class ArxivScraper(object):
         date_from,
         date_until,
         category_blacklist=[],
-        category_whitelist=["cs.CV", "cs.AI", "cs.LG", "cs.CL", "cs.IR"],
-        optional_keywords=[
-            "LLM",
-            "LLMs",
-            "language model",
-            "language models",
-            "multimodal",
-            "finetuning",
-            "GPT",
-        ],
+        category_whitelist=["cs.CV", "cs.AI", "cs.LG", "cs.CL", "cs.IR", "cs.MA"],
+        optional_keywords=["LLM", "LLMs", "language model", "language models", "multimodal", "finetuning", "GPT"],
     ):
         """
         一个抓取指定日期范围内的arxiv文章的类,
@@ -36,9 +28,9 @@ class ArxivScraper(object):
             date_from (str): 开始日期(含当天)
             date_until (str): 结束日期(不含当天)
             category_blacklist (list, optional): 黑名单. Defaults to [].
-            category_whitelist (list, optional): 白名单. Defaults to ["cs.CV", "cs.AI", "cs.LG", "cs.CL"].
+            category_whitelist (list, optional): 白名单. Defaults to ["cs.CV", "cs.AI", "cs.LG", "cs.CL", "cs.IR", "cs.MA"].
             optional_keywords (list, optional): 关键词, 各词之间关系为OR, 在标题/摘要中至少要出现一个关键词才会被爬取.
-                                                Defaults to ["LLM", "language model", "multimodal", "finetuning", "GPT"].
+            Defaults to
         """
         self.date_from = date_from
         self.date_until = date_until
@@ -49,9 +41,7 @@ class ArxivScraper(object):
         self.paper_result = PaperResult(date_from, date_until)
         self.category_blacklist = category_blacklist
         self.category_whitelist = category_whitelist
-        self.optional_keywords = [
-            kw.replace(" ", "+") for kw in optional_keywords
-        ]  # url转义
+        self.optional_keywords = [kw.replace(" ", "+") for kw in optional_keywords]  # url转义
         self.console = Console()
 
     @property
@@ -60,7 +50,7 @@ class ArxivScraper(object):
         返回搜索的元数据
         """
         return dict(repo_url="https://github.com/huiyeruzhou/arxiv_crawler", **self.__dict__)
-    
+
     @staticmethod
     def convert_date(date_str, dateformat="%Y-%m-%d"):
         # 解析输入的日期字符串,形如"21 July, 2024"
@@ -216,13 +206,9 @@ class ArxivScraper(object):
 
         soup = BeautifulSoup(content, "html.parser")
         if not self.total:
-            total = soup.select(
-                "#main-container > div.level.is-marginless > div.level-left > h1"
-            )[0].text
+            total = soup.select("#main-container > div.level.is-marginless > div.level-left > h1")[0].text
             # "Showing 1–50 of 2,542,002 results"
-            total = int(
-                total[total.find("of") + 3 : total.find("results")].replace(",", "")
-            )
+            total = int(total[total.find("of") + 3 : total.find("results")].replace(",", ""))
             self.total = total
 
         papers = []
@@ -250,7 +236,9 @@ class ArxivScraper(object):
                 date = date[submit_date + 9 : date.find(";", submit_date)]
 
             category_tag = result.find_all("span", class_="tag")
-            categories = [category.get_text(strip=True) for category in category_tag if "tooltip" in category.get("class")]
+            categories = [
+                category.get_text(strip=True) for category in category_tag if "tooltip" in category.get("class")
+            ]
             filtered = False
             for category in categories:
                 if category in self.category_blacklist:
@@ -267,9 +255,7 @@ class ArxivScraper(object):
                     break
             if filtered:
                 continue
-            if not any(
-                [category in self.category_whitelist for category in categories]
-            ):
+            if not any([category in self.category_whitelist for category in categories]):
                 self.paper_result.add_filtered(
                     PaperFiltered(
                         date=date,
@@ -282,18 +268,10 @@ class ArxivScraper(object):
                 continue
 
             authors_tag = result.find("p", class_="authors")
-            authors = (
-                authors_tag.get_text(strip=True)[len("Authors:") :]
-                if authors_tag
-                else "No authors"
-            )
+            authors = authors_tag.get_text(strip=True)[len("Authors:") :] if authors_tag else "No authors"
 
             summary_tag = result.find("span", class_="abstract-full")
-            abstract = (
-                self.parse_search_text(summary_tag)
-                if summary_tag
-                else "No summary"
-            )
+            abstract = self.parse_search_text(summary_tag) if summary_tag else "No summary"
 
             self.paper_result.add_chosen(
                 Paper(
@@ -317,16 +295,19 @@ class ArxivScraper(object):
                 elif child.name == "a" and ".style.display" in child.get("onclick"):
                     pass
                 else:
-                    import pdb; pdb.set_trace()
+                    import pdb
+
+                    pdb.set_trace()
         return string
+
     async def translate(self):
         """
         异步翻译论文的标题和摘要
         """
         await self.paper_result.translate()
 
-    def output(self, output_dir="./output_llms", filename_format="%Y-%m-%d", meta=False):
-        self.paper_result.output(output_dir, filename_format, self.meta_data if meta else None)
+    def to_markdown(self, output_dir="./output_llms", filename_format="%Y-%m-%d", meta=False):
+        self.paper_result.to_markdown(output_dir, filename_format, self.meta_data if meta else None)
 
     def to_csv(self, output_dir="./output_llms", filename_format="%Y-%m-%d", csv_config={}):
         self.paper_result.to_csv(output_dir, filename_format, csv_config)
@@ -347,4 +328,4 @@ if __name__ == "__main__":
     )
     asyncio.run(scraper.fetch_all())
     asyncio.run(scraper.translate())
-    scraper.output(meta=True)
+    scraper.to_markdown(meta=True)
