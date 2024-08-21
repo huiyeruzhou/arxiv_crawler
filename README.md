@@ -13,11 +13,13 @@ markdown 示意：
     <img src="readme/markdown_demo.png" alt="markdown demo" style="width: 60%; height: auto;" />
 </div>
 
-还可以配合飞书进行使用，实现方便的阅读和筛选，详情见[配合飞书的进阶用法](#配合飞书的进阶用法)
+还可以配合飞书进行使用，实现方便的阅读和筛选，详情见[配合飞书的进阶用法](#进阶用法-配合飞书使用)
 
 ![alt text](readme/lark_demo.png)
 
-## 基本用法：爬取论文为 markdown
+论文的数据将被持久化在一个本地数据库`papers.db`中，这是为了便于进行[基于公示时间的增量更新](#进阶用法-基于公示时间的增量更新)。这么做的好处和必要性在该章节中有详细说明。
+
+## 基本用法：爬取当天提交的论文为 markdown
 
 1. 克隆本仓库到本地
 
@@ -64,6 +66,7 @@ python paper.py
   - optional_keywords (list, optional): 关键词, 各词之间关系为 OR, 在标题/摘要中至少要出现一个关键词才会被爬取.
     Defaults to [ "LLM", "LLMs", "language model", "language models", "multimodal", "finetuning", "GPT"]
   - trans_to: 翻译的目标语言, 若设为可转换为 False 的值则不会翻译
+  - proxy (str | None, optional): 用于翻译和爬取arxiv时要使用的代理, 通常是http://127.0.0.1:7890. Defaults to None
 
 - 输出文件名是根据日期生成的，可以使用`output`方法的`filename_format`参数修改日期格式，默认为`%Y-%m-%d`即形如`2024-08-08.md`。
 
@@ -128,7 +131,7 @@ output_llms
   - **Filtered Reason**: cat:none of ['cs.SE'] in whitelist
 ```
 
-## 配合飞书的进阶用法
+## 进阶用法-配合飞书使用
 
 得益于飞书文档提供的[多维表格](https://www.feishu.cn/hc/zh-CN/category/6933474572494716956-%E5%A4%9A%E7%BB%B4%E8%A1%A8%E6%A0%BC)功能，我们可以将论文信息转换为看板视图，以获得极尽丝滑的体验：
 
@@ -156,7 +159,6 @@ scraper = ArxivScraper(
     date_until=data_until,
 )
 asyncio.run(scraper.fetch_all())
-asyncio.run(scraper.translate())
 scraper.to_csv(csv_config=dict(delimiter="\t", header=False))
 ```
 
@@ -196,6 +198,87 @@ scraper.to_csv(csv_config=dict(delimiter="\t", header=False))
 然后`ctrl+a`全选再`ctrl+v`粘贴到表格中即可！
 
 接下来切换到看板视图开始阅读论文吧！
+
+## 进阶用法-基于公示时间的增量更新
+
+爬取论文的目的是为了获取第一手的学术视野，因而漏召错过经典论文会带来很大的损失。为了避免漏召，我们可以加入大量关键词，以保证搜集全该领域的文章。
+
+然而，还有一种情况是无法避免的：某论文于 A 日提交，但直到 A+x 日才被公开。由于 arxiv 中基于公开日期的搜索只支持**以月份为粒度**，因此我们无法精确的获得**某天公开**的所有论文。
+
+不过，我们可以爬取所有当月公开的论文，然后将其按照**越新越前**的方式进行排序。这样就可以实现增量更新：每次爬取当月所有文章，将其添加到数据库，直到某篇文章已经存在于库中。
+如果基于**首次提交日期**进行搜索，是无法做到这样的效果的，因为一篇文章可能在提交一年以后才被公开，没法进行定向检索。
+
+当然，如果一篇文章先公开，又在我们爬到它之前隐藏了怎么办？只能说这种蛇皮文章不看也罢（笑），当然，你也可以定期运行增量更新脚本，通常 LLM 领域每日新增文章 100 篇以内。
+
+使用公开日期进行搜索时，构造`ArxivScraper`时, 设置`filt_date_type=announced_date_first`。注意这种情况下，date_from和date_until会被自动处理：
+
+- 如果 date_from 和 date_until 是同一个月，则 date_from设置为当前月，date_until 设置为下个月。
+  例：`date_from="2024-08-01"`, `date_until="2024-08-15"`, 实际搜索时，date_from 设置为 `"2024-08"`，date_until 设置为 `"2024-09"`
+- 如果 date_from 和 date_until 不是同一个月，则 date_from 设置为 date_from 的月份，date_until 设置为 date_until 的月份
+  例：`date_from="2024-08-01"`, `date_until="2024-09-30"`, 实际搜索时，date_from 设置为 `"2024-08"`，date_until 设置为 `"2024-09"`
+
+如果使用的是`fetch_all`方法，则会将上述事件范围内的所有论文都爬取到数据库中。如果使用的是`fetch_update`方法，则会将新增的论文爬取到数据库中。
+
+### 1. 建立初始数据库
+
+运行下来代码，会将 2024 年 8 月的所有论文都爬取到数据库中，这可能多达 2000 篇，但用时应该在 2min 左右。
+
+```py
+from arxiv_crawler import ArxivScraper
+import asyncio
+date_from = "2024-08-01"
+data_until = "2024-09-01"
+
+scraper = ArxivScraper(
+    date_from=date_from,
+    date_until=data_until,
+    filt_date_type="announced_date_first"
+)
+asyncio.run(scraper.fetch_all())
+```
+
+一旦建成数据库，就不应该再使用基于首次提交的爬取方法了，否则会影响后续的增量判断。如果你不慎提交了一些错误的论文，可以使用以下 SQL 语句删除当天的论文。或者重新运行上述代码覆盖当月记录。
+
+```sql
+Begin transaction
+delete from papers where first_submitted_date = '2024-08-19'
+commit
+```
+
+### 2. 增量更新
+
+由于更新过程需要逐个检查论文是否已经存在，因此增量更新时不再使用异步爬取而是使用同步爬取，这会导致一定的速度下降，对于少量论文来说无所谓。
+
+如果很久没有更新，建议直接用`fetch_all`方法爬整月论文，这样更快并且不会导致错误。
+
+```py
+from arxiv_crawler import ArxivScraper
+import asyncio
+date_from = "2024-08-15"
+data_until = "2024-08-16"
+# 这里的date_from和date_until只会影响导出的范围
+
+scraper = ArxivScraper(
+    date_from=date_from,
+    date_until=data_until,
+    filt_date_type="announced_date_first"
+)
+scraper.fetch_update()
+scraper.to_markdown(meta=True)
+scraper.to_csv(csv_config=dict(delimiter="\t", header=False))
+```
+
+### 3. 导出内容
+
+除了上述代码中展示的“更新并且导出”的功能，还可以直接从数据库中导出内容。
+
+```py
+from arxiv_crawler import PaperExporter
+
+exporter = PaperExporter("2024-08-19", "2024-08-20")
+exporter.to_markdown()
+exporter.to_csv(csv_config=dict(delimiter="\t", header=False))
+```
 
 ## 相关技术
 

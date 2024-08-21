@@ -1,3 +1,4 @@
+from bs4 import Tag
 from typing_extensions import Literal
 
 CATS_MAP = {
@@ -241,6 +242,7 @@ if __name__ == "__main__":
     # 运行下面这段代码，可以获取CATS_MAP
     import requests
     from bs4 import BeautifulSoup
+
     from async_translator import translate
 
     # 请求页面内容
@@ -266,7 +268,9 @@ if __name__ == "__main__":
             category_code = div.contents[0].strip()
 
             # 获取 <span> 标签中的文本 (即 Artificial Intelligence 部分)
-            english_name = div.find("span").text.strip("()")
+            english_name_tag = div.find("span")
+            assert isinstance(english_name_tag, Tag)
+            english_name = english_name_tag.get_text(strip=True)
 
             # 构造字典条目
             domains[category_code] = {

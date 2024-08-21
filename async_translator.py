@@ -1,6 +1,8 @@
-import aiohttp
 import asyncio
+
+import aiohttp
 import requests
+
 
 class TranslateTask:
     def __init__(self, raw, langfrom="en", langto="zh-CN", result=None, secret=None):
@@ -140,9 +142,7 @@ def google_translate(data, url="https://translate.googleapis.com", proxy=None):
             "sl": data.langfrom,
             "tl": data.langto,
         },
-        proxies={
-            "https": proxy
-        }
+        proxies={"https": proxy},
     )
 
     response.raise_for_status()  # 交由requests抛出异常

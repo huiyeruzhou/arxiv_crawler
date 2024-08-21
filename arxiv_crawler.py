@@ -1,12 +1,14 @@
-from bs4 import BeautifulSoup, NavigableString, Tag
+import asyncio
 import re
+from datetime import datetime, timedelta
+
+import aiohttp
+from bs4 import BeautifulSoup, NavigableString, Tag
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn
-import asyncio
-import aiohttp
-from datetime import datetime
 from typing_extensions import Literal
-from paper import PaperDatabase, Paper
+
+from paper import Paper, PaperDatabase, PaperExporter
 
 
 class ArxivScraper(object):
@@ -19,7 +21,7 @@ class ArxivScraper(object):
         optional_keywords=["LLM", "LLMs", "language model", "language models", "multimodal", "finetuning", "GPT"],
         trans_to="zh-CN",
         filt_date_type: Literal["submitted_date_first", "announced_date_first"] = "submitted_date_first",
-        proxy=None
+        proxy=None,
     ):
         """
         一个抓取指定日期范围内的arxiv文章的类,
@@ -40,21 +42,32 @@ class ArxivScraper(object):
                 注意，如果指定为"announced_date_first"，则会按照公布日期筛选，这样的筛选是最全的，但日期**只有年月部分**有效，日部分会被忽略。
             proxy (str | None, optional): 用于翻译和爬取arxiv时要使用的代理, 通常是http://127.0.0.1:7890. Defaults to None
         """
-        self.date_from = date_from  # url
-        self.date_until = date_until  # url
+        self.search_date_from = date_from
+        self.search_date_until = date_until
+        if filt_date_type == "announced_date_first":
+            # announced_date_first 日期处理为年月，从from到until的所有月份都会被爬取
+            # 如果from和until是同一个月，则until设置为下个月(from+31)
+            search_date_from = datetime.strptime(self.search_date_from[:-3], "%Y-%m")
+            search_date_until = datetime.strptime(self.search_date_until[:-3], "%Y-%m")
+            if search_date_from.month == search_date_until.month:
+                search_date_until = search_date_from + timedelta(days=31)
+            self.search_date_from = search_date_from.strftime("%Y-%m")
+            self.search_date_until = search_date_until.strftime("%Y-%m")
+            
         self.category_blacklist = category_blacklist  # used as metadata
         self.category_whitelist = category_whitelist  # used as metadata
         self.optional_keywords = [kw.replace(" ", "+") for kw in optional_keywords]  # url转义
         self.filt_date_by = filt_date_type
         self.trans_to = trans_to  # translate
         self.proxy = proxy
-        
+
         self.order = "-announced_date_first"  # url(结果默认按首次公布日期的降序排列，这样最新公布的会在前面)
         self.total = None  # fetch_all
         self.step = 50  # url, fetch_all
         self.papers: list[Paper] = []  # fetch_all
 
-        self.paper_db = PaperDatabase(date_from, date_until, category_blacklist, category_whitelist)
+        self.paper_db = PaperDatabase()
+        self.paper_exporter = PaperExporter(date_from, date_until, category_blacklist, category_whitelist)
         self.console = Console()
 
     @property
@@ -73,10 +86,13 @@ class ArxivScraper(object):
             filter_date_by (str, optional): 日期筛选方式. Defaults to "submitted_date_first".
         """
         # https://arxiv.org/search/advanced?terms-0-operator=AND&terms-0-term=LLM&terms-0-field=all&terms-1-operator=OR&terms-1-term=language+model&terms-1-field=all&terms-2-operator=OR&terms-2-term=multimodal&terms-2-field=all&terms-3-operator=OR&terms-3-term=finetuning&terms-3-field=all&terms-4-operator=AND&terms-4-term=GPT&terms-4-field=all&classification-computer_science=y&classification-physics_archives=all&classification-include_cross_list=include&date-year=&date-filter_by=date_range&date-from_date=2024-08-08&date-to_date=2024-08-15&date-date_type=submitted_date_first&abstracts=show&size=50&order=submitted_date
-        kwargs = "".join(f"&terms-{i}-operator=OR&terms-{i}-term={kw}&terms-{i}-field=all" for i, kw in enumerate(self.optional_keywords))
+        kwargs = "".join(
+            f"&terms-{i}-operator=OR&terms-{i}-term={kw}&terms-{i}-field=all"
+            for i, kw in enumerate(self.optional_keywords)
+        )
         return (
             f"https://arxiv.org/search/advanced?advanced={kwargs}"
-            + f"&classification-computer_science=y&classification-physics_archives=all&classification-include_cross_list=include&date-year=&date-filter_by=date_range&date-from_date={self.date_from}&date-to_date={self.date_until}&date-date_type={self.filt_date_by}&abstracts=show&size={self.step}&order={self.order}&start={start}"
+            + f"&classification-computer_science=y&classification-physics_archives=all&classification-include_cross_list=include&date-year=&date-filter_by=date_range&date-from_date={self.search_date_from}&date-to_date={self.search_date_until}&date-date_type={self.filt_date_by}&abstracts=show&size={self.step}&order={self.order}&start={start}"
         )
 
     async def fetch_all(self):
@@ -271,7 +287,9 @@ class ArxivScraper(object):
                 date = date[submit_date + 9 : date.find(";", submit_date)]
 
             category_tag = result.find_all("span", class_="tag")
-            categories = [category.get_text(strip=True) for category in category_tag if "tooltip" in category.get("class")]
+            categories = [
+                category.get_text(strip=True) for category in category_tag if "tooltip" in category.get("class")
+            ]
 
             authors_tag = result.find("p", class_="authors")
             authors = authors_tag.get_text(strip=True)[len("Authors:") :] if authors_tag else "No authors"
@@ -330,10 +348,10 @@ class ArxivScraper(object):
             await asyncio.gather(*[worker(paper) for paper in self.papers])
 
     def to_markdown(self, output_dir="./output_llms", filename_format="%Y-%m-%d", meta=False):
-        self.paper_db.to_markdown(output_dir, filename_format, self.meta_data if meta else None)
+        self.paper_exporter.to_markdown(output_dir, filename_format, self.meta_data if meta else None)
 
     def to_csv(self, output_dir="./output_llms", filename_format="%Y-%m-%d", csv_config={}):
-        self.paper_db.to_csv(output_dir, filename_format, csv_config)
+        self.paper_exporter.to_csv(output_dir, filename_format, csv_config)
 
 
 if __name__ == "__main__":
