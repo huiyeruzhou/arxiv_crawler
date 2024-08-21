@@ -282,7 +282,7 @@ class ArxivScraper(object):
             # "Showing 1–50 of 2,542,002 results" or "Sorry, your query returned no results"
             if "Sorry" in total:
                 self.total = 0
-                return
+                return []
             total = int(total[total.find("of") + 3 : total.find("results")].replace(",", ""))
             self.total = total
 
@@ -374,8 +374,8 @@ class ArxivScraper(object):
     def to_markdown(self, output_dir="./output_llms", filename_format="%Y-%m-%d", meta=False):
         self.paper_exporter.to_markdown(output_dir, filename_format, self.meta_data if meta else None)
 
-    def to_csv(self, output_dir="./output_llms", filename_format="%Y-%m-%d", csv_config={}, header=False):
-        self.paper_exporter.to_csv(output_dir, filename_format, csv_config, header)
+    def to_csv(self, output_dir="./output_llms", filename_format="%Y-%m-%d",  header=False, csv_config={},):
+        self.paper_exporter.to_csv(output_dir, filename_format, header, csv_config)
 
 
 if __name__ == "__main__":
