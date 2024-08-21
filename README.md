@@ -1,8 +1,15 @@
 # ARXIV_CRAWLER
 
-这是一个高效，快捷的 arXiv 论文爬虫，它可以将指定时间范围，指定主题，包含指定关键词的论文信息爬取到本地，并且将其中的标题和摘要翻译成中文。
+这是一个高效，快捷的 arXiv 论文爬虫，它可以将指定主题，包含指定关键词的论文信息爬取到本地，并且将其中的标题和摘要翻译成中文。
 
-通过进行异步网络请求，这个爬虫能够在两分钟之内爬取并翻译 2000 篇文章的标题和摘要信息，并且将其输出为精美的 markdown 文件
+主要特点包括：
+
+- 高速：通过进行异步网络请求，这个爬虫能够在两分钟之内爬取并翻译 2000 篇文章的标题和摘要信息，并且将其输出为精美的 markdown 文件（取决于您的网络带宽，在一个能高速链接arxiv和google的环境下只需要十几秒）。
+- 完备：通过以**最新公布时间**为索引，这个爬虫可以做到按天为单位更新且无漏召，无重复。
+- 增量更新：这个爬虫会维护一个本地数据库，每次爬取时只需要将新提交的文章插入到数据库中。但它也支持你补充过去某段时间的文章。
+- 可视化：爬取的结果可以导出为csv文件，配合飞书实现的精美可视化界面更加方便阅读和筛选，详情见[配合飞书的进阶用法](#进阶用法-配合飞书使用)
+
+![alt text](readme/lark_demo.png)
 
 下列示意中，系统用 4s 爬取并翻译了 2024 年 8 月 19 日的全部 70 篇文章，并根据其领域过滤了其中的 6 篇。并将结果输出到`output_llms/2024-08-19.md`中。
 ![alt text](readme/cli_demo.png)
@@ -13,11 +20,7 @@ markdown 示意：
     <img src="readme/markdown_demo.png" alt="markdown demo" style="width: 60%; height: auto;" />
 </div>
 
-还可以配合飞书进行使用，实现方便的阅读和筛选，详情见[配合飞书的进阶用法](#进阶用法-配合飞书使用)
-
-![alt text](readme/lark_demo.png)
-
-论文的数据将被持久化在一个本地数据库`papers.db`中，这是为了便于进行[基于公示时间的增量更新](#进阶用法-基于公示时间的增量更新)。这么做的好处和必要性在该章节中有详细说明。
+论文的数据将被持久化在一个本地数据库`papers.db`中，这是为了便于进行[基于公布时间的增量更新](#进阶用法-基于公布时间的增量更新)。
 
 ## 基本用法：爬取当天提交的论文为 markdown
 
@@ -38,13 +41,38 @@ pip install requests
 
 3. 运行
 
+- 建立基础数据库
+
 ```bash
 python arxiv_crawler.py
 ```
 
-这段代码会将最近**一天**内大模型相关的论文信息爬取到本地的`papers.db`中，并且将其输出为带有元信息的 markdown 文件。
+这段代码会将最近**一个月**内大模型相关的论文信息爬取到本地的`papers.db`中，并且将最近**一天**内公布的文章输出为带有元信息的 markdown 文件。
 
-日常使用时只需要修改这部分代码中的内容即可。你可以将`if __name__ == '__main__':`之后的代码复制到`run.py`中，它不会被 git 跟踪。
+- 增量更新
+
+由于更新过程需要逐个检查论文是否已经存在，因此增量更新时不再使用异步爬取而是使用同步爬取，这会导致一定的速度下降，对于少量论文来说无所谓。如果很久没有更新，建议直接用`fetch_all`方法爬整月论文，这样更快。
+
+增量更新的原理请见[进阶用法-基于公布时间的增量更新](#进阶用法-基于公布时间的增量更新)。
+
+```py
+from datetime import date, timedelta
+from arxiv_crawler import ArxivScraper
+today = date.today()
+recent = today - timedelta(days=1)
+
+scraper = ArxivScraper(
+    date_from=recent.strftime("%Y-%m-%d"),
+    date_until=today.strftime("%Y-%m-%d"),
+)
+scraper.fetch_update()
+scraper.to_markdown()
+scraper.to_csv(csv_config=dict(delimiter="\t", header=False))
+```
+
+日常使用时只需要修改这部分代码中的内容即可。你可以将代码复制到`run.py`中，它不会被 git 跟踪。
+
+- 从数据库中生成markdown/csv
 
 ```bash
 python paper.py
@@ -63,9 +91,9 @@ python paper.py
   - date_until (str): 结束日期(不含当天)
   - category_blacklist (list, optional): 黑名单. Defaults to [].
   - category_whitelist (list, optional): 白名单. Defaults to ["cs.CV", "cs.AI", "cs.LG", "cs.CL", "cs.IR", "cs.MA"].
-  - optional_keywords (list, optional): 关键词, 各词之间关系为 OR, 在标题/摘要中至少要出现一个关键词才会被爬取.
-    Defaults to [ "LLM", "LLMs", "language model", "language models", "multimodal", "finetuning", "GPT"]
-  - trans_to: 翻译的目标语言, 若设为可转换为 False 的值则不会翻译
+  - optional_keywords (list, optional): 关键词, 各词之间关系为OR, 在标题/摘要中至少要出现一个关键词才会被爬取.
+        Defaults to [ "LLM", "LLMs", "language model", "language models", "multimodal", "finetuning", "GPT"]
+  - trans_to: 翻译的目标语言, 若设为可转换为False的值则不会翻译
   - proxy (str | None, optional): 用于翻译和爬取arxiv时要使用的代理, 通常是http://127.0.0.1:7890. Defaults to None
 
 - 输出文件名是根据日期生成的，可以使用`output`方法的`filename_format`参数修改日期格式，默认为`%Y-%m-%d`即形如`2024-08-08.md`。
@@ -159,7 +187,7 @@ scraper = ArxivScraper(
     date_until=data_until,
 )
 asyncio.run(scraper.fetch_all())
-scraper.to_csv(csv_config=dict(delimiter="\t", header=False))
+scraper.to_csv(csv_config=dict(delimiter="\t"), header=False)
 ```
 
 ### 2.建立飞书多维表格
@@ -199,85 +227,69 @@ scraper.to_csv(csv_config=dict(delimiter="\t", header=False))
 
 接下来切换到看板视图开始阅读论文吧！
 
-## 进阶用法-基于公示时间的增量更新
+## 进阶用法-基于公布时间的增量更新
 
-爬取论文的目的是为了获取第一手的学术视野，因而漏召错过经典论文会带来很大的损失。为了避免漏召，我们可以加入大量关键词，以保证搜集全该领域的文章。
+爬取论文的目的是为了获取第一手的学术视野，因漏召而错过好论文会带来很大的损失。为了避免漏召，我们可以加入大量关键词，以保证搜集全该领域的文章。
 
 然而，还有一种情况是无法避免的：某论文于 A 日提交，但直到 A+x 日才被公开。由于 arxiv 中基于公开日期的搜索只支持**以月份为粒度**，因此我们无法精确的获得**某天公开**的所有论文。
 
-不过，我们可以爬取所有当月公开的论文，然后将其按照**越新越前**的方式进行排序。这样就可以实现增量更新：每次爬取当月所有文章，将其添加到数据库，直到某篇文章已经存在于库中。
-如果基于**首次提交日期**进行搜索，是无法做到这样的效果的，因为一篇文章可能在提交一年以后才被公开，没法进行定向检索。
+### 增量内容的判断
 
-当然，如果一篇文章先公开，又在我们爬到它之前隐藏了怎么办？只能说这种蛇皮文章不看也罢（笑），当然，你也可以定期运行增量更新脚本，通常 LLM 领域每日新增文章 100 篇以内。
+虽然我们不能指定搜索某日更新的论文，不过我们可以爬取一整月的论文，然后将其按照**越新越前**的方式进行排序。第一次运行爬虫时，我们将所有文章加入数据库中。之后每次我们都从前往后将他们加入数据库，直到我们遇到已经存在于数据库中的论文。这就完成了所有增量内容的更新。
 
-使用公开日期进行搜索时，构造`ArxivScraper`时, 设置`filt_date_type=announced_date_first`。注意这种情况下，date_from和date_until会被自动处理：
+如果基于**首次提交日期**进行搜索，是无法做到这样的效果的，因为一篇文章可能在提交一年以后才被公开，没法进行定向检索。当然，如果一篇文章先公开，又在我们爬到它之前隐藏了怎么办？只能期待这种蛇皮文章应该不会太多。
 
-- 如果 date_from 和 date_until 是同一个月，则 date_from设置为当前月，date_until 设置为下个月。
-  例：`date_from="2024-08-01"`, `date_until="2024-08-15"`, 实际搜索时，date_from 设置为 `"2024-08"`，date_until 设置为 `"2024-09"`
-- 如果 date_from 和 date_until 不是同一个月，则 date_from 设置为 date_from 的月份，date_until 设置为 date_until 的月份
-  例：`date_from="2024-08-01"`, `date_until="2024-09-30"`, 实际搜索时，date_from 设置为 `"2024-08"`，date_until 设置为 `"2024-09"`
+### 公布时间的推断
 
-如果使用的是`fetch_all`方法，则会将上述事件范围内的所有论文都爬取到数据库中。如果使用的是`fetch_update`方法，则会将新增的论文爬取到数据库中。
+上述方法虽然可以保证我们总是能爬取到最新的论文，但如果我们只按照论文首次提交日期索引，就没办法**读取**最新的论文。
 
-### 1. 建立初始数据库
+例如8.19我们爬到了8.12，8.16，8.18的论文各一篇，我们要读这三篇文章就得重新导出这三天的论文列表。一种折衷方式是每次都把“当日之前提交，但在当天才公布”的论文打印出来作为补充列表。但这样也很麻烦。
 
-运行下来代码，会将 2024 年 8 月的所有论文都爬取到数据库中，这可能多达 2000 篇，但用时应该在 2min 左右。
+于是，我们可以尝试“推断”论文的首次公布日期。虽然我们不知道公布时间，但结果是按照公布时间排序的，结合`首次提交日期<首次公布日期`的条件，以及arxiv在周末和假日不公布论文，就可以用下列代码进行推断：
 
 ```py
-from arxiv_crawler import ArxivScraper
-import asyncio
-date_from = "2024-08-01"
-data_until = "2024-09-01"
-
-scraper = ArxivScraper(
-    date_from=date_from,
-    date_until=data_until,
-    filt_date_type="announced_date_first"
-)
-asyncio.run(scraper.fetch_all())
+from arxiv_time import next_arxiv_update_day
+def infer_announced_date(self):
+    """
+    推断文章的首次公布日期
+    """
+    announced_date = self.search_from_date
+    # 公布日期从搜索开始起慢慢往后
+    for paper in reversed(self.papers):
+        if announced_date < paper.first_submitted_date:
+            announced_date = paper.first_submitted_date
+        announced_date = next_arxiv_update_day(announced_date)
+        paper.first_announced_date = announced_date
 ```
 
-一旦建成数据库，就不应该再使用基于首次提交的爬取方法了，否则会影响后续的增量判断。如果你不慎提交了一些错误的论文，可以使用以下 SQL 语句删除当天的论文。或者重新运行上述代码覆盖当月记录。
+值得注意的是，这种情况存在一个问题，假设我们之前的数据库已经更新到了2024-08-01，那么我们在更新08-02的文章时得到如下结果：
+
+```py
+# paper, announce（不可见）, submit（可见)
+(paper1, "2024-08-02", "2024-08-02")
+(paper2, "2024-08-02", "2024-08-01")
+(paper3, "2024-08-02", "2024-08-02")
+(paper4, "2024-08-02", "2024-08-01")
+(paper5, "2024-08-01", "2024-08-01")
+```
+
+当我们进行增量更新时，爬取到paper5时，我们会发现它已经被更新过了，因此paper1-4都是新文章。
+
+但是，paper4的公布时间是什么时候呢？如果我们上一次是在8.1当天晚上运行的代码，那么paper4完全可以是8.1当天才公布的。因为我们只知道paper4比paper5晚公布，且比自己的提交日期晚，这两个条件给出的下界都是8.1。
+
+不过，如果我们上一次是在8.2运行的爬虫，这一次是在8.3，那就可以很确切的知道paper4是8.2才公布的了。因为我们知道当前的提交日期一定要晚于上一次数据库的更新日期。因此，我们可以加入一个新的字段update_time来进行判断。运行时可以将update_time从本地时间转换为美国东部时间，再跳过周末和节假日，就是下一个arxiv更新的时间了。
+
+```py
+# 从上一次更新的最新文章的时间
+self.search_from_date = self.paper_db.newest_updatetime()
+# 搜到的论文实际上是从该时间的下一个arxiv更新日期开始
+self.search_from_date = next_arxiv_update_day(native_to_arxiv(self.search_from_date))
+```
 
 ```sql
-Begin transaction
-delete from papers where first_submitted_date = '2024-08-19'
-commit
-```
-
-### 2. 增量更新
-
-由于更新过程需要逐个检查论文是否已经存在，因此增量更新时不再使用异步爬取而是使用同步爬取，这会导致一定的速度下降，对于少量论文来说无所谓。
-
-如果很久没有更新，建议直接用`fetch_all`方法爬整月论文，这样更快并且不会导致错误。
-
-```py
-from arxiv_crawler import ArxivScraper
-import asyncio
-date_from = "2024-08-15"
-data_until = "2024-08-16"
-# 这里的date_from和date_until只会影响导出的范围
-
-scraper = ArxivScraper(
-    date_from=date_from,
-    date_until=data_until,
-    filt_date_type="announced_date_first"
-)
-scraper.fetch_update()
-scraper.to_markdown(meta=True)
-scraper.to_csv(csv_config=dict(delimiter="\t", header=False))
-```
-
-### 3. 导出内容
-
-除了上述代码中展示的“更新并且导出”的功能，还可以直接从数据库中导出内容。
-
-```py
-from arxiv_crawler import PaperExporter
-
-exporter = PaperExporter("2024-08-19", "2024-08-20")
-exporter.to_markdown()
-exporter.to_csv(csv_config=dict(delimiter="\t", header=False))
+SELECT MAX(update_time) as max_updated_time
+FROM papers
+WHERE first_announced_date = (SELECT MAX(first_announced_date) FROM papers)
 ```
 
 ## 相关技术

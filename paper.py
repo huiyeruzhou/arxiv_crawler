@@ -2,14 +2,16 @@ import asyncio
 import csv
 import sqlite3
 from collections import defaultdict
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+from dataclasses import dataclass, fields
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from rich.console import Console
+from typing_extensions import Iterable
 
 from async_translator import async_translate
 from categories import parse_categories
+
 
 
 @dataclass
@@ -22,10 +24,10 @@ class Paper:
     abstract: str
     title_translated: str | None = None
     abstract_translated: str | None = None
+    first_announced_date: datetime | None = None
 
     @classmethod
-    def from_row(cls, cursor, row):
-        row = sqlite3.Row(cursor, row)
+    def from_row(cls, row: sqlite3.Row):
         return cls(
             first_submitted_date=datetime.strptime(row["first_submitted_date"], "%Y-%m-%d"),
             title=row["title"],
@@ -35,6 +37,7 @@ class Paper:
             abstract=row["abstract"],
             title_translated=row["title_translated"],
             abstract_translated=row["abstract_translated"],
+            first_announced_date=datetime.strptime(row["first_announced_date"], "%Y-%m-%d"),
         )
 
     def to_markdown(self):
@@ -46,7 +49,8 @@ class Paper:
         )
         return f"""### [{self.title}]({self.url})
 > **Authors**: {self.authors}
-> **First submission**: {self.first_submitted_date}
+> **First submission**: {self.first_submitted_date.strftime("%Y-%m-%d")}
+> **First announcement**: {self.first_announced_date.strftime("%Y-%m-%d")}
 - **标题**: {self.title_translated}
 - **领域**: {categories}
 {abstract}
@@ -76,8 +80,17 @@ class PaperRecord:
 class PaperDatabase:
     def __init__(self, db_path="papers.db"):
         self.conn = sqlite3.connect(db_path)
-        self.conn.row_factory = Paper.from_row
+        self.conn.row_factory = self._row_factory
         self._create_table()
+
+    @staticmethod
+    def _row_factory(cursor, row):
+        row = sqlite3.Row(cursor, row)
+        # all fields in Paper, plus `update_time`
+        if len(row.keys()) == len(fields(Paper)) + 1:
+            return Paper.from_row(row)
+        else:
+            return row
 
     def _create_table(self):
         with self.conn:
@@ -90,6 +103,7 @@ class PaperDatabase:
                     title TEXT NOT NULL,
                     categories TEXT NOT NULL,
                     first_submitted_date DATE NOT NULL,
+                    first_announced_date DATE NOT NULL,
                     title_translated TEXT,
                     abstract_translated TEXT,
                     update_time DATETIME NOT NULL
@@ -97,7 +111,8 @@ class PaperDatabase:
             """
             )
 
-    def add_papers(self, papers: list[Paper]):
+    def add_papers(self, papers: Iterable[Paper]):
+        assert all([paper.first_announced_date is not None for paper in papers])
         with self.conn:
             data_to_insert = [
                 (
@@ -107,6 +122,7 @@ class PaperDatabase:
                     paper.title,
                     ",".join(paper.categories),
                     paper.first_submitted_date.strftime("%Y-%m-%d"),
+                    paper.first_announced_date.strftime("%Y-%m-%d"),
                     paper.title_translated,
                     paper.abstract_translated,
                     datetime.now(),
@@ -116,15 +132,14 @@ class PaperDatabase:
             self.conn.executemany(
                 """
                 INSERT OR REPLACE INTO papers 
-                (url, authors, abstract, title, categories, first_submitted_date, title_translated, abstract_translated, update_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (url, authors, abstract, title, categories, first_submitted_date, first_announced_date, title_translated, abstract_translated, update_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 data_to_insert,
             )
 
-    def update_papers(self, papers: list[Paper]) -> bool:
-        new_papers = []
-        continue_update = True
+    def count_new_papers(self, papers: Iterable[Paper]) -> int:
+        cnt = 0
         for paper in papers:
             with self.conn:
                 cursor = self.conn.execute(
@@ -134,22 +149,36 @@ class PaperDatabase:
                     (paper.url,),
                 )
                 if cursor.fetchone():
-                    continue_update = False
                     break
                 else:
-                    new_papers.append(paper)
-        self.add_papers(new_papers)
-        return continue_update
+                    cnt += 1
+        return cnt
 
     def fetch_papers_on_date(self, date: datetime) -> list[Paper]:
         with self.conn:
             cursor = self.conn.execute(
                 """
-                SELECT * FROM papers WHERE first_submitted_date = ?
+                SELECT * FROM papers WHERE first_announced_date = ?
                 """,
                 (date.strftime("%Y-%m-%d"),),
             )
             return cursor.fetchall()
+
+    def newest_updatetime(self) -> datetime:
+        """
+        最新更新时间是“上一次爬取最新论文的时间”
+        由于数据库可能补充爬取过去的论文，所以先选最新论文，再从其中选最新的爬取时间
+        """
+        with self.conn:
+            cursor = self.conn.execute(
+                """
+                SELECT MAX(update_time) as max_updated_time
+                FROM papers
+                WHERE first_announced_date = (SELECT MAX(first_announced_date) FROM papers)
+                """
+            )
+        time = cursor.fetchone()["max_updated_time"].split(".")[0]
+        return datetime.strptime(time, "%Y-%m-%d %H:%M:%S")
 
     async def translate_missing(self, langto="zh-CN"):
         with self.conn:
@@ -227,9 +256,8 @@ class PaperExporter:
             with open(output_dir / f"{current_filename}.md", "w", encoding="utf-8") as file:
                 papers = self.db.fetch_papers_on_date(current)
                 chosen_records, filtered_records = self.filter_papers(papers)
-                preface_str += f"# 论文全览：{current_filename}\n\n共有{len(chosen_records)}篇相关领域论文, 另有{len(filtered_records)}篇其他\n\n"
+                papers_str = f"# 论文全览：{current_filename}\n\n共有{len(chosen_records)}篇相关领域论文, 另有{len(filtered_records)}篇其他\n\n"
 
-                papers_str = ""
                 chosen_dict = defaultdict(list)
                 for record in chosen_records:
                     chosen_dict[record.paper.categories[0]].append(record)
@@ -250,7 +278,7 @@ class PaperExporter:
                 f"[bold green]Output {current_filename}.md completed. {len(chosen_records)} papers chosen, {len(filtered_records)} papers filtered"
             )
 
-    def to_csv(self, output_dir="./output_llms", filename_format="%Y-%m-%d", csv_config={}):
+    def to_csv(self, output_dir="./output_llms", filename_format="%Y-%m-%d", header=True, csv_config={}):
         output_dir = Path(output_dir)
         output_dir.mkdir(exist_ok=True, parents=True)
 
@@ -264,6 +292,7 @@ class PaperExporter:
             "Authors": lambda record: record.paper.authors,
             "URL": lambda record: record.paper.url,
             "First Submitted Date": lambda record: record.paper.first_submitted_date.strftime("%Y-%m-%d"),
+            "First Announced Date": lambda record: record.paper.first_announced_date.strftime("%Y-%m-%d"),
             "Abstract": lambda record: record.paper.abstract,
             "Abstract Translated": lambda record: (
                 record.paper.abstract_translated if record.paper.abstract_translated else "-"
@@ -278,7 +307,6 @@ class PaperExporter:
             current_filename = current.strftime(filename_format)
 
             with open(output_dir / f"{current_filename}.csv", "w", encoding="utf-8") as file:
-                header = csv_config.pop("header", True)
                 if "lineterminator" not in csv_config:
                     csv_config["lineterminator"] = "\n"
                 writer = csv.writer(file, **csv_config)
@@ -301,9 +329,6 @@ if __name__ == "__main__":
     today = date.today()
     recent = today - timedelta(days=1)
 
-    date_from = recent.strftime("%Y-%m-%d")
-    date_until = today.strftime("%Y-%m-%d")
-
-    exporter = PaperExporter(date_from, date_until)
+    exporter = PaperExporter(recent.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
     exporter.to_markdown()
     exporter.to_csv(csv_config=dict(delimiter="\t", header=False))

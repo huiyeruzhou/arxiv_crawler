@@ -1,13 +1,13 @@
 import asyncio
 import re
 from datetime import datetime, timedelta
+from itertools import chain
 
 import aiohttp
 from bs4 import BeautifulSoup, NavigableString, Tag
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn
-from typing_extensions import Literal
-
+from arxiv_time import native_to_arxiv, next_arxiv_update_day
 from paper import Paper, PaperDatabase, PaperExporter
 
 
@@ -20,7 +20,6 @@ class ArxivScraper(object):
         category_whitelist=["cs.CV", "cs.AI", "cs.LG", "cs.CL", "cs.IR", "cs.MA"],
         optional_keywords=["LLM", "LLMs", "language model", "language models", "multimodal", "finetuning", "GPT"],
         trans_to="zh-CN",
-        filt_date_type: Literal["submitted_date_first", "announced_date_first"] = "submitted_date_first",
         proxy=None,
     ):
         """
@@ -38,29 +37,23 @@ class ArxivScraper(object):
             optional_keywords (list, optional): 关键词, 各词之间关系为OR, 在标题/摘要中至少要出现一个关键词才会被爬取.
                 Defaults to [ "LLM", "LLMs", "language model", "language models", "multimodal", "finetuning", "GPT"]
             trans_to: 翻译的目标语言, 若设为可转换为False的值则不会翻译
-            filt_date_type (Literal["submitted_date_first", "announced_date_first"], optional): 日期筛选方式. Defaults to "submitted_date_first".
-                注意，如果指定为"announced_date_first"，则会按照公布日期筛选，这样的筛选是最全的，但日期**只有年月部分**有效，日部分会被忽略。
             proxy (str | None, optional): 用于翻译和爬取arxiv时要使用的代理, 通常是http://127.0.0.1:7890. Defaults to None
         """
-        self.search_date_from = date_from
-        self.search_date_until = date_until
-        if filt_date_type == "announced_date_first":
-            # announced_date_first 日期处理为年月，从from到until的所有月份都会被爬取
-            # 如果from和until是同一个月，则until设置为下个月(from+31)
-            search_date_from = datetime.strptime(self.search_date_from[:-3], "%Y-%m")
-            search_date_until = datetime.strptime(self.search_date_until[:-3], "%Y-%m")
-            if search_date_from.month == search_date_until.month:
-                search_date_until = search_date_from + timedelta(days=31)
-            self.search_date_from = search_date_from.strftime("%Y-%m")
-            self.search_date_until = search_date_until.strftime("%Y-%m")
-            
+        # announced_date_first 日期处理为年月，从from到until的所有月份都会被爬取
+        # 如果from和until是同一个月，则until设置为下个月(from+31)
+        self.search_from_date = datetime.strptime(date_from[:-3], "%Y-%m")
+        self.search_until_date = datetime.strptime(date_until[:-3], "%Y-%m")
+        if self.search_from_date.month == self.search_until_date.month:
+            self.search_until_date = (self.search_from_date + timedelta(days=31)).replace(day=1)
+
         self.category_blacklist = category_blacklist  # used as metadata
         self.category_whitelist = category_whitelist  # used as metadata
         self.optional_keywords = [kw.replace(" ", "+") for kw in optional_keywords]  # url转义
-        self.filt_date_by = filt_date_type
+
         self.trans_to = trans_to  # translate
         self.proxy = proxy
 
+        self.filt_date_by = "announced_date_first"  # url
         self.order = "-announced_date_first"  # url(结果默认按首次公布日期的降序排列，这样最新公布的会在前面)
         self.total = None  # fetch_all
         self.step = 50  # url, fetch_all
@@ -90,82 +83,15 @@ class ArxivScraper(object):
             f"&terms-{i}-operator=OR&terms-{i}-term={kw}&terms-{i}-field=all"
             for i, kw in enumerate(self.optional_keywords)
         )
+        date_from = self.search_from_date.strftime("%Y-%m")
+        date_until = self.search_until_date.strftime("%Y-%m")
         return (
             f"https://arxiv.org/search/advanced?advanced={kwargs}"
-            + f"&classification-computer_science=y&classification-physics_archives=all&classification-include_cross_list=include&date-year=&date-filter_by=date_range&date-from_date={self.search_date_from}&date-to_date={self.search_date_until}&date-date_type={self.filt_date_by}&abstracts=show&size={self.step}&order={self.order}&start={start}"
+            f"&classification-computer_science=y&classification-physics_archives=all&"
+            f"classification-include_cross_list=include&"
+            f"date-year=&date-filter_by=date_range&date-from_date={date_from}&date-to_date={date_until}&"
+            f"date-date_type={self.filt_date_by}&abstracts=show&size={self.step}&order={self.order}&start={start}"
         )
-
-    async def fetch_all(self):
-        """
-        (aio)获取所有文章
-        """
-        # 获取前50篇文章并记录总数
-        self.console.log(f"[bold green]Fetching the first {self.step} papers...")
-        self.console.print(f"[grey] {self.get_url(0)}")
-        content = await self.request(0)
-        self.parse_search_html(content)
-
-        # 获取剩余的内容
-        with Progress(
-            SpinnerColumn(),
-            *Progress.get_default_columns(),
-            TimeElapsedColumn(),
-            console=self.console,
-            transient=False,
-        ) as p:  # rich进度条
-            task = p.add_task(
-                description=f"[bold green]Fetching {self.total} results",
-                total=self.total,
-            )
-            p.update(task, advance=self.step)
-
-            async def wrapper(start):  # wrapper用于显示进度
-                # 异步请求网页，并解析其中的内容
-                content = await self.request(start)
-                self.parse_search_html(content)
-                p.update(task, advance=self.step)
-
-            # 创建异步任务
-            fetch_tasks = []
-            for start in range(self.step, self.total, self.step):
-                fetch_tasks.append(wrapper(start))
-            await asyncio.gather(*fetch_tasks)
-
-        self.console.log(f"[bold green]Fetching completed. ")
-        if self.trans_to:
-            await self.translate()
-        self.paper_db.add_papers(self.papers)
-
-    def fetch_update(self):
-        """
-        更新文章, 这会从最新公布的文章开始更新, 直到遇到已经爬取过的文章为止。
-        为了效率，建议在运行fetch_all后再运行fetch_update
-        """
-        self.console.log(f"[bold green]Updating the first {self.step} papers...")
-        self.console.print(f"[grey] {self.get_url(0)}")
-
-        content = asyncio.run(self.request(0))
-        self.parse_search_html(content)
-        continue_update = self.update_and_clear_papers()
-        for start in range(self.step, self.total, self.step):
-            if not continue_update:
-                break
-
-            content = asyncio.run(self.request(start))
-            self.parse_search_html(content)
-            continue_update = self.update_and_clear_papers()
-
-            self.console.log(f"[bold green]Updating the {start}-{start+50} papers...")
-        self.console.log("[bold green]Updating completed.")
-        return
-
-    def update_and_clear_papers(self):
-        if self.trans_to:
-            asyncio.run(self.translate())
-        continue_update = self.paper_db.update_papers(self.papers)
-        self.papers = []
-        return continue_update
-
     async def request(self, start):
         """
         异步请求网页，重试至多3次
@@ -185,7 +111,103 @@ class ArxivScraper(object):
                 self.console.print_exception()
                 self.console.log(f"[bold red]Retrying {start}... {error}/3")
 
-    def parse_search_html(self, content):
+    async def fetch_all(self):
+        """
+        (aio)获取所有文章
+        """
+        # 获取前50篇文章并记录总数
+        self.console.log(f"[bold green]Fetching the first {self.step} papers...")
+        self.console.print(f"[grey] {self.get_url(0)}")
+        content = await self.request(0)
+        self.papers.extend(self.parse_search_html(content))
+
+        # 获取剩余的内容
+        with Progress(
+            SpinnerColumn(),
+            *Progress.get_default_columns(),
+            TimeElapsedColumn(),
+            console=self.console,
+            transient=False,
+        ) as p:  # rich进度条
+            task = p.add_task(
+                description=f"[bold green]Fetching {self.total} results",
+                total=self.total,
+            )
+            p.update(task, advance=self.step)
+
+            async def wrapper(start):  # wrapper用于显示进度
+                # 异步请求网页，并解析其中的内容
+                content = await self.request(start)
+                papers = self.parse_search_html(content)
+                p.update(task, advance=self.step)
+                return papers
+
+            # 创建异步任务
+            fetch_tasks = []
+            for start in range(self.step, self.total, self.step):
+                fetch_tasks.append(wrapper(start))
+            papers_list = await asyncio.gather(*fetch_tasks)
+            self.papers.extend(chain(*papers_list))
+
+        self.console.log(f"[bold green]Fetching completed. ")
+        self.process_papers()
+
+    def fetch_update(self):
+        """
+        更新文章, 这会从最新公布的文章开始更新, 直到遇到已经爬取过的文章为止。
+        为了效率，建议在运行fetch_all后再运行fetch_update
+        """
+        # 从上一次更新的最新文章的时间
+        self.search_from_date = self.paper_db.newest_updatetime()
+        # 搜到的论文实际上是从该时间的下一个arxiv更新日期开始
+        self.search_from_date = next_arxiv_update_day(native_to_arxiv(self.search_from_date))
+        self.console.log(
+            f"[bold green]Searching from {self.search_from_date.strftime('%Y-%m-%d')} "
+            f"to {self.search_until_date.strftime('%Y-%m-%d')}, fetch the first {self.step} papers..."
+        )
+        self.console.print(f"[grey] {self.get_url(0)}")
+
+        continue_update = self.update(0)
+        for start in range(self.step, self.total, self.step):
+            if not continue_update:
+                break
+
+            continue_update = self.update(start)
+        self.console.log(f"[bold green]Fetching completed. {len(self.papers)} new papers.")
+        self.process_papers()
+
+    def process_papers(self):
+        """
+        推断文章的首次公布日期, 翻译文章，并将文章添加到数据库中
+        """
+        announced_date = self.search_from_date
+        # 公布日期从搜索开始起慢慢往后
+        for paper in reversed(self.papers):
+            if announced_date < paper.first_submitted_date:
+                announced_date = paper.first_submitted_date
+            announced_date = next_arxiv_update_day(announced_date)
+            paper.first_announced_date = announced_date
+        if self.trans_to:
+            asyncio.run(self.translate())
+        self.paper_db.add_papers(self.papers)
+        # with open("announced_date.csv", "w") as f:
+        #     f.write("url,title,announced_date,submitted_date\n")
+        #     for paper in self.papers:
+        #         f.write(
+        #             f"{paper.url},{paper.title},{paper.first_announced_date.strftime('%Y-%m-%d')},{paper.first_submitted_date.strftime('%Y-%m-%d')}\n"
+        #         )
+
+    def update(self, start) -> bool:
+        content = asyncio.run(self.request(start))
+        self.papers.extend(self.parse_search_html(content))
+        cnt_new = self.paper_db.count_new_papers(self.papers[start : start + self.step])
+        if cnt_new < self.step:
+            self.papers = self.papers[: start + cnt_new]
+            return False
+        else:
+            return True
+
+    def parse_search_html(self, content) -> list[Paper]:
         """
         解析搜索结果页面, 并将结果保存到self.paper_result中
         初次调用时, 会解析self.total
@@ -265,6 +287,7 @@ class ArxivScraper(object):
             self.total = total
 
         results = soup.find_all("li", {"class": "arxiv-result"})
+        papers = []
         for result in results:
 
             url_tag = result.find("a")
@@ -297,7 +320,7 @@ class ArxivScraper(object):
             summary_tag = result.find("span", class_="abstract-full")
             abstract = self.parse_search_text(summary_tag) if summary_tag else "No summary"
 
-            self.papers.append(
+            papers.append(
                 Paper(
                     url=url,
                     title=title,
@@ -307,6 +330,7 @@ class ArxivScraper(object):
                     abstract=abstract,
                 )
             )
+        return papers
 
     def parse_search_text(self, tag):
         string = ""
@@ -350,8 +374,8 @@ class ArxivScraper(object):
     def to_markdown(self, output_dir="./output_llms", filename_format="%Y-%m-%d", meta=False):
         self.paper_exporter.to_markdown(output_dir, filename_format, self.meta_data if meta else None)
 
-    def to_csv(self, output_dir="./output_llms", filename_format="%Y-%m-%d", csv_config={}):
-        self.paper_exporter.to_csv(output_dir, filename_format, csv_config)
+    def to_csv(self, output_dir="./output_llms", filename_format="%Y-%m-%d", csv_config={}, header=False):
+        self.paper_exporter.to_csv(output_dir, filename_format, csv_config, header)
 
 
 if __name__ == "__main__":
@@ -360,12 +384,9 @@ if __name__ == "__main__":
     today = date.today()
     recent = today - timedelta(days=1)
 
-    date_from = recent.strftime("%Y-%m-%d")
-    data_until = today.strftime("%Y-%m-%d")
-
     scraper = ArxivScraper(
-        date_from=date_from,
-        date_until=data_until,
+        date_from=recent.strftime("%Y-%m-%d"),
+        date_until=today.strftime("%Y-%m-%d"),
     )
     asyncio.run(scraper.fetch_all())
     scraper.to_markdown(meta=True)
