@@ -58,12 +58,11 @@ python arxiv_crawler.py
 ```py
 from datetime import date, timedelta
 from arxiv_crawler import ArxivScraper
-today = date.today()
-recent = today - timedelta(days=1)
+today = date.today().strftime("%Y-%m-%d"),
 
 scraper = ArxivScraper(
-    date_from=recent.strftime("%Y-%m-%d"),
-    date_until=today.strftime("%Y-%m-%d"),
+    date_from=today,
+    date_until=today,
 )
 scraper.fetch_update()
 scraper.to_markdown()
@@ -88,7 +87,7 @@ python paper.py
   Args:
 
   - date_from (str): 开始日期(含当天)
-  - date_until (str): 结束日期(不含当天)
+  - date_until (str): 结束日期(含当天)
   - category_blacklist (list, optional): 黑名单. Defaults to [].
   - category_whitelist (list, optional): 白名单. Defaults to ["cs.CV", "cs.AI", "cs.LG", "cs.CL", "cs.IR", "cs.MA"].
   - optional_keywords (list, optional): 关键词, 各词之间关系为OR, 在标题/摘要中至少要出现一个关键词才会被爬取.
@@ -176,15 +175,11 @@ from arxiv_crawler import ArxivScraper
 import asyncio
 from datetime import date, timedelta
 
-today = date.today()
-recent = today - timedelta(days=1)
-
-date_from = recent.strftime("%Y-%m-%d")
-data_until = today.strftime("%Y-%m-%d")
+today = date.today().strftime("%Y-%m-%d")
 
 scraper = ArxivScraper(
-    date_from=date_from,
-    date_until=data_until,
+    date_from=today,
+    date_until=today,
 )
 asyncio.run(scraper.fetch_all())
 scraper.to_csv(csv_config=dict(delimiter="\t"), header=False)
@@ -248,42 +243,34 @@ scraper.to_csv(csv_config=dict(delimiter="\t"), header=False)
 于是，我们可以尝试“推断”论文的首次公布日期。虽然我们不知道公布时间，但结果是按照公布时间排序的，结合`首次提交日期<首次公布日期`的条件，以及arxiv在周末和假日不公布论文，就可以用下列代码进行推断：
 
 ```py
-from arxiv_time import next_arxiv_update_day
-def infer_announced_date(self):
+from arxiv_time import next_arxiv_update_day, native_local_to_utc
+def process_papers(self):
     """
-    推断文章的首次公布日期
+    推断文章的首次公布日期, 并将文章添加到数据库中
     """
-    announced_date = self.search_from_date
-    # 公布日期从搜索开始起慢慢往后
+    # 搜索日期如果不为工作日，则向后推迟
+    announced_date = next_arxiv_update_day(self.search_from_date)   
     for paper in reversed(self.papers):
-        if announced_date < paper.first_submitted_date:
-            announced_date = paper.first_submitted_date
-        announced_date = next_arxiv_update_day(announced_date)
+        # 文章于T日美东时间14:00(T-1 UTC+0 18:00)前提交，将于T日美东时间20:00(T UTC+0 00:00)公布，T始终为工作日。
+        # 因此可知UTC+0 T日的文章至少在UTC+0 T+1日公布
+        next_possible_annouced_date = next_arxiv_update_day(paper.first_submitted_date + timedelta(days=1))
+        if announced_date < next_possible_annouced_date:
+            announced_date = next_possible_annouced_date
         paper.first_announced_date = announced_date
+    self.paper_db.add_papers(self.papers)
 ```
 
-值得注意的是，这种情况存在一个问题，假设我们之前的数据库已经更新到了2024-08-01，那么我们在更新08-02的文章时得到如下结果：
+同样的，我们也可以通过上一次更新数据库的时间来判断期间是否有arxiv更新：
 
 ```py
-# paper, announce（不可见）, submit（可见)
-(paper1, "2024-08-02", "2024-08-02")
-(paper2, "2024-08-02", "2024-08-01")
-(paper3, "2024-08-02", "2024-08-02")
-(paper4, "2024-08-02", "2024-08-01")
-(paper5, "2024-08-01", "2024-08-01")
-```
-
-当我们进行增量更新时，爬取到paper5时，我们会发现它已经被更新过了，因此paper1-4都是新文章。
-
-但是，paper4的公布时间是什么时候呢？如果我们上一次是在8.1当天晚上运行的代码，那么paper4完全可以是8.1当天才公布的。因为我们只知道paper4比paper5晚公布，且比自己的提交日期晚，这两个条件给出的下界都是8.1。
-
-不过，如果我们上一次是在8.2运行的爬虫，这一次是在8.3，那就可以很确切的知道paper4是8.2才公布的了。因为我们知道当前的提交日期一定要晚于上一次数据库的更新日期。因此，我们可以加入一个新的字段update_time来进行判断。运行时可以将update_time从本地时间转换为美国东部时间，再跳过周末和节假日，就是下一个arxiv更新的时间了。
-
-```py
-# 从上一次更新的最新文章的时间
-self.search_from_date = self.paper_db.newest_updatetime()
-# 搜到的论文实际上是从该时间的下一个arxiv更新日期开始
-self.search_from_date = next_arxiv_update_day(native_to_arxiv(self.search_from_date))
+# 上一次更新最新文章的时间. 除了更新新文章外也可能重新爬取了老文章, 数据库只看最新文章的时间戳。
+self.search_from_date = self.paper_db.newest_update_time()
+# 检查一下上次之后的最近一个arxiv更新日期
+self.search_from_date = next_arxiv_update_day(native_local_to_utc(self.search_from_date))
+# 如果还没到更新时间就不更新了
+if self.search_from_date >= native_local_to_utc(datetime.now()):
+    self.console.log(f"[bold red]Your database is already up to date.")
+    return
 ```
 
 ```sql

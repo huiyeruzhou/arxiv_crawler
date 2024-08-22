@@ -7,7 +7,7 @@ import aiohttp
 from bs4 import BeautifulSoup, NavigableString, Tag
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn
-from arxiv_time import native_to_arxiv, next_arxiv_update_day
+from arxiv_time import next_arxiv_update_day, native_local_to_utc
 from paper import Paper, PaperDatabase, PaperExporter
 
 
@@ -31,7 +31,7 @@ class ArxivScraper(object):
 
         Args:
             date_from (str): 开始日期(含当天)
-            date_until (str): 结束日期(不含当天)
+            date_until (str): 结束日期(含当天)
             category_blacklist (list, optional): 黑名单. Defaults to [].
             category_whitelist (list, optional): 白名单. Defaults to ["cs.CV", "cs.AI", "cs.LG", "cs.CL", "cs.IR", "cs.MA"].
             optional_keywords (list, optional): 关键词, 各词之间关系为OR, 在标题/摘要中至少要出现一个关键词才会被爬取.
@@ -150,6 +150,8 @@ class ArxivScraper(object):
             self.papers.extend(chain(*papers_list))
 
         self.console.log(f"[bold green]Fetching completed. ")
+        if self.trans_to:
+            await self.translate()
         self.process_papers()
 
     def fetch_update(self):
@@ -157,10 +159,14 @@ class ArxivScraper(object):
         更新文章, 这会从最新公布的文章开始更新, 直到遇到已经爬取过的文章为止。
         为了效率，建议在运行fetch_all后再运行fetch_update
         """
-        # 从上一次更新的最新文章的时间
-        self.search_from_date = self.paper_db.newest_updatetime()
-        # 搜到的论文实际上是从该时间的下一个arxiv更新日期开始
-        self.search_from_date = next_arxiv_update_day(native_to_arxiv(self.search_from_date))
+        # 上一次更新最新文章的时间. 除了更新新文章外也可能重新爬取了老文章, 数据库只看最新文章的时间戳。
+        self.search_from_date = self.paper_db.newest_update_time()
+        # 检查一下上次之后的最近一个arxiv更新日期
+        self.search_from_date = next_arxiv_update_day(native_local_to_utc(self.search_from_date))
+        # 如果还没到更新时间就不更新了
+        if self.search_from_date >= native_local_to_utc(datetime.now()):
+            self.console.log(f"[bold red]Your database is already up to date.")
+            return
         self.console.log(
             f"[bold green]Searching from {self.search_from_date.strftime('%Y-%m-%d')} "
             f"to {self.search_until_date.strftime('%Y-%m-%d')}, fetch the first {self.step} papers..."
@@ -174,28 +180,37 @@ class ArxivScraper(object):
 
             continue_update = self.update(start)
         self.console.log(f"[bold green]Fetching completed. {len(self.papers)} new papers.")
+        if self.trans_to:
+            asyncio.run(self.translate())
         self.process_papers()
 
     def process_papers(self):
         """
-        推断文章的首次公布日期, 翻译文章，并将文章添加到数据库中
+        推断文章的首次公布日期, 并将文章添加到数据库中
         """
-        announced_date = self.search_from_date
-        # 公布日期从搜索开始起慢慢往后
+        # 搜索日期如果不为工作日，则向后推迟
+        announced_date = next_arxiv_update_day(self.search_from_date)   
         for paper in reversed(self.papers):
-            if announced_date < paper.first_submitted_date:
-                announced_date = paper.first_submitted_date
-            announced_date = next_arxiv_update_day(announced_date)
+            # 文章于T日美东时间14:00(T-1 UTC+0 18:00)前提交，将于T日美东时间20:00(T UTC+0 00:00)公布，T始终为工作日。
+            # 因此可知UTC+0 T日的文章至少在UTC+0 T+1日公布
+            next_possible_annouced_date = next_arxiv_update_day(paper.first_submitted_date + timedelta(days=1))
+            if announced_date < next_possible_annouced_date:
+                announced_date = next_possible_annouced_date
             paper.first_announced_date = announced_date
-        if self.trans_to:
-            asyncio.run(self.translate())
         self.paper_db.add_papers(self.papers)
-        # with open("announced_date.csv", "w") as f:
-        #     f.write("url,title,announced_date,submitted_date\n")
-        #     for paper in self.papers:
-        #         f.write(
-        #             f"{paper.url},{paper.title},{paper.first_announced_date.strftime('%Y-%m-%d')},{paper.first_submitted_date.strftime('%Y-%m-%d')}\n"
-        #         )
+    
+    def reprocess_papers(self):
+        """
+        这会从数据库中获取所有文章, 并重新推断文章的首次公布日期，并打印调试信息
+        """
+        self.papers = self.paper_db.fetch_all()
+        self.process_papers()
+        with open("announced_date.csv", "w") as f:
+            f.write("url,title,announced_date,submitted_date\n")
+            for paper in self.papers:
+                f.write(
+                    f"{paper.url},{paper.title},{paper.first_announced_date.strftime('%Y-%m-%d')},{paper.first_submitted_date.strftime('%Y-%m-%d')}\n"
+                )
 
     def update(self, start) -> bool:
         content = asyncio.run(self.request(start))
@@ -320,6 +335,9 @@ class ArxivScraper(object):
             summary_tag = result.find("span", class_="abstract-full")
             abstract = self.parse_search_text(summary_tag) if summary_tag else "No summary"
 
+            comments_tag = result.find("p", class_="comments")
+            comments = comments_tag.get_text(strip=True)[len("Comments:") :] if comments_tag else "No comments"
+
             papers.append(
                 Paper(
                     url=url,
@@ -328,6 +346,7 @@ class ArxivScraper(object):
                     categories=categories,
                     authors=authors,
                     abstract=abstract,
+                    comments=comments,
                 )
             )
         return papers
@@ -382,10 +401,9 @@ if __name__ == "__main__":
     from datetime import date, timedelta
 
     today = date.today()
-    recent = today - timedelta(days=1)
 
     scraper = ArxivScraper(
-        date_from=recent.strftime("%Y-%m-%d"),
+        date_from=today.strftime("%Y-%m-%d"),
         date_until=today.strftime("%Y-%m-%d"),
     )
     asyncio.run(scraper.fetch_all())

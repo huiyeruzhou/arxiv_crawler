@@ -22,6 +22,7 @@ class Paper:
     url: str
     authors: str
     abstract: str
+    comments: str
     title_translated: str | None = None
     abstract_translated: str | None = None
     first_announced_date: datetime | None = None
@@ -35,6 +36,7 @@ class Paper:
             url=row["url"],
             authors=row["authors"],
             abstract=row["abstract"],
+            comments=row["comments"],
             title_translated=row["title_translated"],
             abstract_translated=row["abstract_translated"],
             first_announced_date=datetime.strptime(row["first_announced_date"], "%Y-%m-%d"),
@@ -47,10 +49,12 @@ class Paper:
             if self.abstract_translated
             else f"- **Abstract**: {self.abstract}"
         )
-        return f"""### [{self.title}]({self.url})
+        return f"""### {self.title} 
+[[arxiv]({self.url})] [[cool]({self.url.replace("https://arxiv.org/abs", "https://papers.cool/arxiv")})]
 > **Authors**: {self.authors}
 > **First submission**: {self.first_submitted_date.strftime("%Y-%m-%d")}
 > **First announcement**: {self.first_announced_date.strftime("%Y-%m-%d")}
+> **comment**: {self.comments}
 - **标题**: {self.title_translated}
 - **领域**: {categories}
 {abstract}
@@ -99,14 +103,15 @@ class PaperDatabase:
                 CREATE TABLE IF NOT EXISTS papers (
                     url TEXT PRIMARY KEY,
                     authors TEXT NOT NULL,
-                    abstract TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    categories TEXT NOT NULL,
+                    title_translated TEXT,
                     first_submitted_date DATE NOT NULL,
                     first_announced_date DATE NOT NULL,
-                    title_translated TEXT,
-                    abstract_translated TEXT,
-                    update_time DATETIME NOT NULL
+                    update_time DATETIME NOT NULL,
+                    categories TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    comments TEXT NOT NULL,
+                    abstract TEXT NOT NULL,
+                    abstract_translated TEXT
                 )
             """
             )
@@ -125,6 +130,7 @@ class PaperDatabase:
                     paper.first_announced_date.strftime("%Y-%m-%d"),
                     paper.title_translated,
                     paper.abstract_translated,
+                    paper.comments,
                     datetime.now(),
                 )
                 for paper in papers
@@ -132,8 +138,8 @@ class PaperDatabase:
             self.conn.executemany(
                 """
                 INSERT OR REPLACE INTO papers 
-                (url, authors, abstract, title, categories, first_submitted_date, first_announced_date, title_translated, abstract_translated, update_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (url, authors, abstract, title, categories, first_submitted_date, first_announced_date, title_translated, abstract_translated, comments, update_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 data_to_insert,
             )
@@ -164,7 +170,16 @@ class PaperDatabase:
             )
             return cursor.fetchall()
 
-    def newest_updatetime(self) -> datetime:
+    def fetch_all(self) -> list[Paper]:
+        with self.conn:
+            cursor = self.conn.execute(
+                """
+                SELECT * FROM papers
+                """
+            )
+            return cursor.fetchall()
+
+    def newest_update_time(self) -> datetime:
         """
         最新更新时间是“上一次爬取最新论文的时间”
         由于数据库可能补充爬取过去的论文，所以先选最新论文，再从其中选最新的爬取时间
@@ -211,7 +226,7 @@ class PaperExporter:
         self.db = PaperDatabase(database_path)
         self.date_from = datetime.strptime(date_from, "%Y-%m-%d")
         self.date_until = datetime.strptime(date_until, "%Y-%m-%d")
-        self.date_range_days = (self.date_until - self.date_from).days
+        self.date_range_days = (self.date_until - self.date_from).days + 1
         self.categories_blacklist = set(categories_blacklist)
         self.categories_whitelist = set(categories_whitelist)
         self.console = Console()
@@ -291,13 +306,15 @@ class PaperExporter:
             "Categories": lambda record: ",".join(record.paper.categories),
             "Authors": lambda record: record.paper.authors,
             "URL": lambda record: record.paper.url,
+            "PapersCool": lambda record: record.paper.url.replace("https://arxiv.org/abs", "https://papers.cool/arxiv"),
             "First Submitted Date": lambda record: record.paper.first_submitted_date.strftime("%Y-%m-%d"),
             "First Announced Date": lambda record: record.paper.first_announced_date.strftime("%Y-%m-%d"),
             "Abstract": lambda record: record.paper.abstract,
             "Abstract Translated": lambda record: (
                 record.paper.abstract_translated if record.paper.abstract_translated else "-"
             ),
-            "comment": lambda record: record.comment,
+            "Comments": lambda record: record.paper.comments,
+            "Note": lambda record: record.comment,
         }
 
         headers = list(csv_table.keys())
@@ -327,8 +344,7 @@ if __name__ == "__main__":
     from datetime import date, timedelta
 
     today = date.today()
-    recent = today - timedelta(days=1)
 
-    exporter = PaperExporter(recent.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
+    exporter = PaperExporter(today.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
     exporter.to_markdown()
     exporter.to_csv(csv_config=dict(delimiter="\t", header=False))
