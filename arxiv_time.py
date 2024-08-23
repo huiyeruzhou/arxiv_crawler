@@ -1,5 +1,4 @@
 from datetime import UTC, datetime, timedelta
-from tzlocal import get_localzone
 from functools import lru_cache
 
 HOLIDAY_2024 = [
@@ -15,9 +14,6 @@ HOLIDAY_2024 = [
 ]
 HOLIDAY_2024_date = [datetime.strptime(d, "%Y %d %B") for d in HOLIDAY_2024]
 
-
-def native_local_to_utc(naive_time: datetime):
-    return naive_time.replace(tzinfo=get_localzone()).astimezone(UTC)
 
 @lru_cache()
 def next_arxiv_update_day(time: datetime):

@@ -134,18 +134,19 @@ output_llms
 ```md
 # 论文全览：2024-08-16
 
-共有 57 篇相关领域论文，另有 6 篇其他论文
+共有68篇相关领域论文, 另有4篇其他
 
 ## 人工智能(cs.AI:Artificial Intelligence)
 
-### [Fine-tuningLLMsfor Autonomous Spacecraft Control: A Case Study Using Kerbal Space Program](https://arxiv.org/abs/2408.08676)
-
-> **Authors**: Alejandro Carrasco,Victor Rodriguez-Fernandez,Richard Linares
-> **First submission**: 16 August, 2024
-
-- **标题**: 用于自主航天器控制的微调 LLM：使用坎巴拉太空计划的案例研究
-- **领域**: 人工智能,天体物理学仪器和方法
-- **摘要**: 最近出现的趋势是使用大型语言模型（LLM）作为自主代理，根据用户文本提示的内容采取行动。本研究探索使用微调大型语言模型 (LLM) 进行自主航天器控制，并使用坎巴拉太空计划微分游戏套件 (KSPDG) 作为测试环境。由于模拟能力和数据不足，传统的强化学习（RL）方法在该领域面临局限性。通过利用 LLM，特别是 GPT-3.5 和 LLaMA 等微调模型，我们演示了这些模型如何使用基于语言的输入和输出有效地控制航天器。我们的方法将实时任务遥测集成到 LLM 处理的文本提示中，然后通过代理生成控制操作。结果引发了一场关于法学硕士在空间操作方面的潜力的讨论，超出了其名义上用于文本相关任务的范围。未来的工作旨在将这种方法扩展到其他空间控制任务，并评估不同法学硕士系列的表现。该代码可通过以下 URL 获取：\texttt{https://github.com/ARCLab-MIT/kspdg}。
+###  A theory of understanding for artificial intelligence: composability, catalysts, and learning  
+[[arxiv](https://arxiv.org/abs/2408.08463)] [[cool](https://papers.cool/arxiv/2408.08463)] [[pdf](https://arxiv.org/pdf/2408.08463)]
+> **Authors**: Zijian Zhang,Sara Aronowitz,Alán Aspuru-Guzik
+> **First submission**: 2024-08-15
+> **First announcement**: 2024-08-16
+> **comment**: 13 pages, 3 figures
+- **标题**: 人工智能理解理论：可组合性、催化剂和学习
+- **领域**: 人工智能
+- **摘要**: 理解是人工智能（AI）中一个至关重要但又难以捉摸的概念。这项工作提出了一个基于可组合性概念的分析理解的框架。对于任何主体（例如，人或人工智能），我们建议从验证者的角度，根据其将相关输入处理（组合）为令人满意的输出的能力来描述其对对象的理解。这种高度通用的框架可以很容易地应用于非人类主体，例如人工智能、非人类动物和机构。此外，我们提出了分析输入的方法，以提高组合物的输出质量，我们称之为催化剂。我们展示了如何通过分析充当催化剂的成分来揭示主体的结构，并认为主体的学习能力可以被视为其将输入组合到其内部催化剂的能力。最后，我们研究了学习能力对于人工智能获得通用智能的重要性。我们的分析表明，能够生成可作为自身催化剂的输出的模型（例如语言模型）为克服人工智能理解中现有的局限性奠定了基础。
 
 ...(Some other content)
 ```
@@ -153,9 +154,9 @@ output_llms
 然后是被过滤掉的内容，会显示它被过滤的原因（命中了哪个黑名单领域/所有领域都不在白名单当中）
 
 ```md
-- [Vulnerability Handling of AI-Generated Code -- Existing Solutions and Open Challenges](https://arxiv.org/abs/2408.08549)
-  - **标题**: 人工智能生成代码的漏洞处理——现有解决方案和开放挑战
-  - **Filtered Reason**: cat:none of ['cs.SE'] in whitelist
+- [ Automating Transparency Mechanisms in the Judicial System Using LLMs: Opportunities and Challenges ](https://arxiv.org/abs/2408.08477)
+  - **标题**: 利用法学硕士实现司法系统透明度机制的自动化：机遇与挑战
+  - **Filtered Reason**: none of cs.CY in whitelist
 ```
 
 ## 进阶用法-配合飞书使用
@@ -263,14 +264,14 @@ def process_papers(self):
 同样的，我们也可以通过上一次更新数据库的时间来判断期间是否有arxiv更新：
 
 ```py
-# 上一次更新最新文章的时间. 除了更新新文章外也可能重新爬取了老文章, 数据库只看最新文章的时间戳。
-self.search_from_date = self.paper_db.newest_update_time()
-# 检查一下上次之后的最近一个arxiv更新日期
-self.search_from_date = next_arxiv_update_day(native_local_to_utc(self.search_from_date))
-# 如果还没到更新时间就不更新了
-if self.search_from_date >= native_local_to_utc(datetime.now()):
-    self.console.log(f"[bold red]Your database is already up to date.")
-    return
+    # 上一次更新最新文章的UTC时间. 除了更新新文章外也可能重新爬取了老文章, 数据库只看最新文章的时间戳。
+    self.search_from_date = self.paper_db.newest_update_time()
+    # 检查一下上次之后的最近一个arxiv更新日期
+    self.search_from_date = next_arxiv_update_day(self.search_from_date)
+    # 如果还没到更新时间就不更新了
+    if self.search_from_date >= datetime.now(UTC).replace(tzinfo=None):
+        self.console.log(f"[bold red]Your database is already up to date.")
+        return
 ```
 
 ```sql

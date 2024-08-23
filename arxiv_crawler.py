@@ -1,13 +1,13 @@
 import asyncio
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from itertools import chain
 
 import aiohttp
 from bs4 import BeautifulSoup, NavigableString, Tag
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn
-from arxiv_time import next_arxiv_update_day, native_local_to_utc
+from arxiv_time import next_arxiv_update_day
 from paper import Paper, PaperDatabase, PaperExporter
 
 
@@ -159,12 +159,12 @@ class ArxivScraper(object):
         更新文章, 这会从最新公布的文章开始更新, 直到遇到已经爬取过的文章为止。
         为了效率，建议在运行fetch_all后再运行fetch_update
         """
-        # 上一次更新最新文章的时间. 除了更新新文章外也可能重新爬取了老文章, 数据库只看最新文章的时间戳。
+        # 上一次更新最新文章的UTC时间. 除了更新新文章外也可能重新爬取了老文章, 数据库只看最新文章的时间戳。
         self.search_from_date = self.paper_db.newest_update_time()
         # 检查一下上次之后的最近一个arxiv更新日期
-        self.search_from_date = next_arxiv_update_day(native_local_to_utc(self.search_from_date))
+        self.search_from_date = next_arxiv_update_day(self.search_from_date)
         # 如果还没到更新时间就不更新了
-        if self.search_from_date >= native_local_to_utc(datetime.now()):
+        if self.search_from_date >= datetime.now(UTC).replace(tzinfo=None):
             self.console.log(f"[bold red]Your database is already up to date.")
             return
         self.console.log(
@@ -310,6 +310,7 @@ class ArxivScraper(object):
 
             title_tag = result.find("p", class_="title")
             title = self.parse_search_text(title_tag) if title_tag else "No title"
+            title = title.strip()
 
             date_tag = result.find("p", class_="is-size-7")
             date = date_tag.get_text(strip=True) if date_tag else "No date"
@@ -334,6 +335,7 @@ class ArxivScraper(object):
 
             summary_tag = result.find("span", class_="abstract-full")
             abstract = self.parse_search_text(summary_tag) if summary_tag else "No summary"
+            abstract = abstract.strip()
 
             comments_tag = result.find("p", class_="comments")
             comments = comments_tag.get_text(strip=True)[len("Comments:") :] if comments_tag else "No comments"

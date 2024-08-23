@@ -3,7 +3,7 @@ import csv
 import sqlite3
 from collections import defaultdict
 from dataclasses import dataclass, fields
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 from rich.console import Console
@@ -41,6 +41,13 @@ class Paper:
             abstract_translated=row["abstract_translated"],
             first_announced_date=datetime.strptime(row["first_announced_date"], "%Y-%m-%d"),
         )
+    @property
+    def papers_cool_url(self):
+        return self.url.replace("https://arxiv.org/abs", "https://papers.cool/arxiv")
+    
+    @property
+    def pdf_url(self):
+        return self.url.replace("https://arxiv.org/abs", "https://arxiv.org/pdf")
 
     def to_markdown(self):
         categories = ",".join(parse_categories(self.categories))
@@ -49,8 +56,9 @@ class Paper:
             if self.abstract_translated
             else f"- **Abstract**: {self.abstract}"
         )
+
         return f"""### {self.title} 
-[[arxiv]({self.url})] [[cool]({self.url.replace("https://arxiv.org/abs", "https://papers.cool/arxiv")})]
+[[arxiv]({self.url})] [[cool]({self.papers_cool_url})] [[pdf]({self.pdf_url})]
 > **Authors**: {self.authors}
 > **First submission**: {self.first_submitted_date.strftime("%Y-%m-%d")}
 > **First announcement**: {self.first_announced_date.strftime("%Y-%m-%d")}
@@ -131,7 +139,7 @@ class PaperDatabase:
                     paper.title_translated,
                     paper.abstract_translated,
                     paper.comments,
-                    datetime.now(),
+                    datetime.now(UTC).replace(tzinfo=None)
                 )
                 for paper in papers
             ]
