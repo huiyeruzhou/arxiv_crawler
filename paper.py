@@ -182,7 +182,7 @@ class PaperDatabase:
         with self.conn:
             cursor = self.conn.execute(
                 """
-                SELECT * FROM papers
+                SELECT * FROM papers ORDER BY url DESC
                 """
             )
             return cursor.fetchall()

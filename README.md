@@ -206,7 +206,7 @@ scraper.to_csv(csv_config=dict(delimiter="\t"), header=False)
 
 ### 3.复制 csv 内容
 
-首先找到输出的文件，比如`output_llms/2024-08-19.csv`，记录一下它一共有多少行，全选并复制
+首先找到输出的文件，比如`output_llms/2024-08-19.csv`
 ![alt text](readme/csv_demo.png)
 
 接下来复制一份数据表，但是只复制其结构
@@ -216,12 +216,10 @@ scraper.to_csv(csv_config=dict(delimiter="\t"), header=False)
     <img src="readme/lark_copy_datasheet2.png" alt="Image 2" style="width: 48%;height: auto"/>
 </div>
 
-在副本里插入和 csv 文件相等行数的内容。
+在副本里插入新行，**至少有一行，且总行数少于记录条数即可！飞书会自动扩展不足的行数**。
 ![alt text](readme/lark_new_datasheet.png)
 
-然后`ctrl+a`全选再`ctrl+v`粘贴到表格中即可！
-
-接下来切换到看板视图开始阅读论文吧！
+然后`ctrl+a`全选再`ctrl+v`粘贴到表格中，接下来切换到看板视图开始阅读论文吧！
 
 ## 进阶用法-基于公布时间的增量更新
 

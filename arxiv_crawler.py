@@ -45,6 +45,8 @@ class ArxivScraper(object):
         self.search_until_date = datetime.strptime(date_until[:-3], "%Y-%m")
         if self.search_from_date.month == self.search_until_date.month:
             self.search_until_date = (self.search_from_date + timedelta(days=31)).replace(day=1)
+        # 由于arxiv的奇怪机制，每个月的第一天公布的文章总会被视作上个月的文章, 所以需要将月初文章的首次公布日期往后推一天
+        self.fisrt_announced_date = next_arxiv_update_day(next_arxiv_update_day(self.search_from_date) + timedelta(days=1))
 
         self.category_blacklist = category_blacklist  # used as metadata
         self.category_whitelist = category_whitelist  # used as metadata
@@ -159,18 +161,31 @@ class ArxivScraper(object):
         更新文章, 这会从最新公布的文章开始更新, 直到遇到已经爬取过的文章为止。
         为了效率，建议在运行fetch_all后再运行fetch_update
         """
+        # 当前时间
+        utc_now = datetime.now(UTC).replace(tzinfo=None)
         # 上一次更新最新文章的UTC时间. 除了更新新文章外也可能重新爬取了老文章, 数据库只看最新文章的时间戳。
-        self.search_from_date = self.paper_db.newest_update_time()
+        last_update = self.paper_db.newest_update_time()
         # 检查一下上次之后的最近一个arxiv更新日期
-        self.search_from_date = next_arxiv_update_day(self.search_from_date)
+        self.search_from_date = next_arxiv_update_day(last_update)
+        self.console.log(f"[bold yellow]last update: {last_update.strftime('%Y-%m-%d %H:%M:%S')}, "
+                         f"next arxiv update: {self.search_from_date.strftime('%Y-%m-%d')}" 
+                         )
+        self.console.log(f"[bold yellow]UTC now: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}")
         # 如果还没到更新时间就不更新了
-        if self.search_from_date >= datetime.now(UTC).replace(tzinfo=None):
+        if self.search_from_date >= utc_now:
             self.console.log(f"[bold red]Your database is already up to date.")
             return
-        self.console.log(
-            f"[bold green]Searching from {self.search_from_date.strftime('%Y-%m-%d')} "
-            f"to {self.search_until_date.strftime('%Y-%m-%d')}, fetch the first {self.step} papers..."
-        )
+        # 如果这一次的更新时间恰好是这个月的第一个更新日，那么当日更新的文章都会出现在上个月的搜索结果中
+        # 为了正确获得这天的文章，我们上推一个月的搜索时间
+        self.fisrt_announced_date = self.search_from_date
+        if self.search_from_date == next_arxiv_update_day(self.search_from_date.replace(day=1)):
+            self.search_from_date = self.search_from_date - timedelta(days=31)
+            self.console.log(f"[bold yellow]The update in {self.fisrt_announced_date.strftime('%Y-%m-%d')} can only be found in the previous month.")
+        else:
+            self.console.log(
+                f"[bold green]Searching from {self.search_from_date.strftime('%Y-%m-%d')} "
+                f"to {self.search_until_date.strftime('%Y-%m-%d')}, fetch the first {self.step} papers..."
+            )
         self.console.print(f"[grey] {self.get_url(0)}")
 
         continue_update = self.update(0)
@@ -188,11 +203,13 @@ class ArxivScraper(object):
         """
         推断文章的首次公布日期, 并将文章添加到数据库中
         """
-        # 搜索日期如果不为工作日，则向后推迟
-        announced_date = next_arxiv_update_day(self.search_from_date)   
+        # 从下一个可能的公布日期开始
+        announced_date = next_arxiv_update_day(self.fisrt_announced_date)   
+        self.console.log(f"fisrt announced date: {announced_date.strftime('%Y-%m-%d')}")
+        # 按照从前到后的时间顺序梳理文章
         for paper in reversed(self.papers):
-            # 文章于T日美东时间14:00(T-1 UTC+0 18:00)前提交，将于T日美东时间20:00(T UTC+0 00:00)公布，T始终为工作日。
-            # 因此可知UTC+0 T日的文章至少在UTC+0 T+1日公布
+            # 文章于T日美东时间14:00(T UTC+0 18:00)前提交，将于T日美东时间20:00(T+1 UTC+0 00:00)公布，T始终为工作日。
+            # 因此可知美东 T日的文章至少在UTC+0 T+1日公布，如果超过14:00甚至会在UTC+0 T+2日公布
             next_possible_annouced_date = next_arxiv_update_day(paper.first_submitted_date + timedelta(days=1))
             if announced_date < next_possible_annouced_date:
                 announced_date = next_possible_annouced_date
