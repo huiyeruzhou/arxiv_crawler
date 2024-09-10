@@ -239,24 +239,26 @@ scraper.to_csv(csv_config=dict(delimiter="\t"), header=False)
 
 例如8.19我们爬到了8.12，8.16，8.18的论文各一篇，我们要读这三篇文章就得重新导出这三天的论文列表。一种折衷方式是每次都把“当日之前提交，但在当天才公布”的论文打印出来作为补充列表。但这样也很麻烦。
 
-于是，我们可以尝试“推断”论文的首次公布日期。虽然我们不知道公布时间，但结果是按照公布时间排序的，结合`首次提交日期<首次公布日期`的条件，以及arxiv在周末和假日不公布论文，就可以用下列代码进行推断：
+于是，我们可以尝试“推断”论文的首次公布日期。虽然我们不知道公布时间，但结果是按照公布时间排序的，结合`首次提交日期<首次公布日期`以及`同一天公布的文章中，越早提交的文章越先公布`的条件，以及arxiv在周末和假日不公布论文，就可以用下列代码进行推断：
 
 ```py
 from arxiv_time import next_arxiv_update_day, native_local_to_utc
-def process_papers(self):
-    """
-    推断文章的首次公布日期, 并将文章添加到数据库中
-    """
-    # 搜索日期如果不为工作日，则向后推迟
-    announced_date = next_arxiv_update_day(self.search_from_date)   
-    for paper in reversed(self.papers):
-        # 文章于T日美东时间14:00(T-1 UTC+0 18:00)前提交，将于T日美东时间20:00(T UTC+0 00:00)公布，T始终为工作日。
-        # 因此可知UTC+0 T日的文章至少在UTC+0 T+1日公布
-        next_possible_annouced_date = next_arxiv_update_day(paper.first_submitted_date + timedelta(days=1))
-        if announced_date < next_possible_annouced_date:
-            announced_date = next_possible_annouced_date
-        paper.first_announced_date = announced_date
-    self.paper_db.add_papers(self.papers)
+    def process_papers(self):
+        """
+        推断文章的首次公布日期, 并将文章添加到数据库中
+        """
+        # 从下一个可能的公布日期开始
+        announced_date = next_arxiv_update_day(self.fisrt_announced_date)   
+        self.console.log(f"fisrt announced date: {announced_date.strftime('%Y-%m-%d')}")
+        # 按照从前到后的时间顺序梳理文章
+        for paper in reversed(self.papers):
+            # 文章于T日美东时间14:00(T UTC+0 18:00)前提交，将于T日美东时间20:00(T+1 UTC+0 00:00)公布，T始终为工作日。
+            # 因此可知美东 T日的文章至少在UTC+0 T+1日公布，如果超过14:00甚至会在UTC+0 T+2日公布
+            next_possible_annouced_date = next_arxiv_update_day(paper.first_submitted_date + timedelta(days=1))
+            if announced_date < next_possible_annouced_date:
+                announced_date = next_possible_annouced_date
+            paper.first_announced_date = announced_date
+        self.paper_db.add_papers(self.papers)
 ```
 
 同样的，我们也可以通过上一次更新数据库的时间来判断期间是否有arxiv更新：
@@ -276,6 +278,39 @@ def process_papers(self):
 SELECT MAX(update_time) as max_updated_time
 FROM papers
 WHERE first_announced_date = (SELECT MAX(first_announced_date) FROM papers)
+```
+
+### 每月首日的处理
+
+上述方法看起来已经非常完善了，然而arxiv网站还存在一些比较尴尬的设定。在搜索系统中的“首次公布时间”，实际上是根据arxivid决定的，也就是说id越大，公布时间越晚，id开头的数字如2408就代表了公布的月份。
+
+这本来没有什么问题，然而在每月的第一个公布日，例如2024年9月2日时，所公布的文章实际上都具有2408开头的id。因此，这些文章全部被错误的标记为“公布于上一个月”。通过OAI-PMH元数据可以查证这一点：
+
+比如[2312.00001的元数据](https://export.arxiv.org/oai2?verb=GetRecord&identifier=oai:arXiv.org:2312.00001&metadataPrefix=arXiv)就显示，它实际上是公布于2023-12-04。而2024-12-01公布的文章，全部都被标记为2024年11月公布了。
+
+为此，我们在推断更新时间和设置搜索时间时都要做相应处理：x月的文章的更新时间至少是x月的第二个公布日期.
+
+对于全量更新，我们要正确设置公示日期，以便正确推断公示日期：
+
+```python
+# 由于arxiv的奇怪机制，每个月的第一天公布的文章总会被视作上个月的文章, 所以需要将月初文章的首次公布日期往后推一天
+self.fisrt_announced_date = next_arxiv_update_day(next_arxiv_update_day(self.search_from_date) + timedelta(days=1))
+```
+
+对于增量更新，我们需要正确的将搜索日期上推一个月，公示日期不变：
+
+```python
+# 如果这一次的更新时间恰好是这个月的第一个更新日，那么当日更新的文章都会出现在上个月的搜索结果中
+# 为了正确获得这天的文章，我们上推一个月的搜索时间
+self.fisrt_announced_date = self.search_from_date
+if self.search_from_date == next_arxiv_update_day(self.search_from_date.replace(day=1)):
+    self.search_from_date = self.search_from_date - timedelta(days=31)
+    self.console.log(f"[bold yellow]The update in {self.fisrt_announced_date.strftime('%Y-%m-%d')} can only be found in the previous month.")
+else:
+    self.console.log(
+        f"[bold green]Searching from {self.search_from_date.strftime('%Y-%m-%d')} "
+        f"to {self.search_until_date.strftime('%Y-%m-%d')}, fetch the first {self.step} papers..."
+    )
 ```
 
 ## 相关技术
