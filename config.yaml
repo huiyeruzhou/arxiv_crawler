@@ -1,0 +1,37 @@
+Feishu:
+  Enable: true
+  App_ID: cli_a7eea4232xxxxxxx
+  App_Secret: 8RTvqR5KcoioI8fjvxvUCDbQY3NIKhaA
+  User_ID: 1b2g65ag
+  include_filtered: false
+Subject:
+  - computer_science
+  # - physics
+  # - economics
+  # - eess
+  # - mathematics
+  # - q_biology
+  # - q_finance
+  # - statistics
+Categories:
+  BlackList: null
+  WhiteList:
+    - cs.CV
+    - cs.AI
+    - cs.LG
+    - cs.CL
+    - cs.IR
+    - cs.MA
+Keywords:
+  - LLM
+  - LLMs
+  - language model
+  - language models
+  - multimodal
+  - finetuning
+  - GPT
+Tans_to: zh-CN
+Proxy:
+  Enable: true
+  Address: 'http://127.0.0.1:7890'
+Output_Directory: ./output

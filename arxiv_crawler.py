@@ -16,6 +16,7 @@ class ArxivScraper(object):
         self,
         date_from,
         date_until,
+        subject_list=["computer_science", "physics", "economics", "eess", "mathematics", "q_biology", "q_finance", "statistics"],
         category_blacklist=[],
         category_whitelist=["cs.CV", "cs.AI", "cs.LG", "cs.CL", "cs.IR", "cs.MA"],
         optional_keywords=["LLM", "LLMs", "language model", "language models", "multimodal", "finetuning", "GPT"],
@@ -32,6 +33,7 @@ class ArxivScraper(object):
         Args:
             date_from (str): 开始日期(含当天)
             date_until (str): 结束日期(含当天)
+            subject_list (list, optional): 领域. Defaults to ["computer_science", "physics", "economics", "eess", "mathematics", "q_biology", "q_finance", "statistics"]
             category_blacklist (list, optional): 黑名单. Defaults to [].
             category_whitelist (list, optional): 白名单. Defaults to ["cs.CV", "cs.AI", "cs.LG", "cs.CL", "cs.IR", "cs.MA"].
             optional_keywords (list, optional): 关键词, 各词之间关系为OR, 在标题/摘要中至少要出现一个关键词才会被爬取.
@@ -48,6 +50,7 @@ class ArxivScraper(object):
         # 由于arxiv的奇怪机制，每个月的第一天公布的文章总会被视作上个月的文章, 所以需要将月初文章的首次公布日期往后推一天
         self.fisrt_announced_date = next_arxiv_update_day(next_arxiv_update_day(self.search_from_date) + timedelta(days=1))
 
+        self.subject_list = subject_list
         self.category_blacklist = category_blacklist  # used as metadata
         self.category_whitelist = category_whitelist  # used as metadata
         self.optional_keywords = [kw.replace(" ", "+") for kw in optional_keywords]  # url转义
@@ -87,9 +90,10 @@ class ArxivScraper(object):
         )
         date_from = self.search_from_date.strftime("%Y-%m")
         date_until = self.search_until_date.strftime("%Y-%m")
+        subjects_query = '&classification-{}=y'.format('=y&classification-'.join(self.subject_list))
         return (
             f"https://arxiv.org/search/advanced?advanced={kwargs}"
-            f"&classification-computer_science=y&classification-physics_archives=all&"
+            f"{subjects_query}&classification-physics_archives=all&"
             f"classification-include_cross_list=include&"
             f"date-year=&date-filter_by=date_range&date-from_date={date_from}&date-to_date={date_until}&"
             f"date-date_type={self.filt_date_by}&abstracts=show&size={self.step}&order={self.order}&start={start}"
